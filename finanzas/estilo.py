@@ -172,16 +172,21 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
     .fin-sub {{ font-size:.72rem; }}
 }}
 
-/* ---- Login premium Álvaro Finanzas ---- */
-.login-head {{ position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; margin:3vh auto 2rem; padding:18px 12px 8px; max-width:560px; }}
-.login-logo {{ width:min(280px,70vw); height:auto; object-fit:contain; border-radius:0; box-shadow:0 14px 45px rgba(47,227,155,.10); }}
-.login-title {{ font-weight:800; font-size:clamp(1.65rem,3vw,2.1rem); color:#eef1f5; letter-spacing:-.04em; }}
-.login-tag {{ color:#8a92a4; font-size:.95rem; }}
-.login-head + div {{ max-width:480px; margin-left:auto; margin-right:auto; }}
-.login-head ~ div [data-testid="stTextInput"] input {{ min-height:48px; background:#0f1117; border:1px solid #23262f; border-radius:13px; }}
-.login-head ~ div [data-testid="stButton"] button[kind="primary"] {{ background:linear-gradient(110deg,#65FFC5,#2fe39b 65%,#00B977); color:#04130D; border:0; min-height:48px; }}
-@media(max-width:700px){{.login-head{{margin-top:1vh}}.login-logo{{width:min(235px,72vw)}}}}
 
+/* ---- Login premium Álvaro Finanzas ---- */
+.login-head{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;margin:4vh auto 2.2rem;padding:0 12px;max-width:540px}
+.login-logo{display:block;width:min(300px,68vw);height:auto;max-height:190px;object-fit:contain;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;margin:0 auto 4px}
+.login-title{font-weight:750;font-size:clamp(1.65rem,3vw,2rem);color:#eef1f5;letter-spacing:-.045em;line-height:1.15}
+.login-tag{color:#8a92a4;font-size:.94rem;margin-top:5px}
+[data-testid="stAppViewContainer"] .block-container{padding-top:1.4rem!important;max-width:1120px!important}
+[data-testid="stAppViewContainer"] [data-testid="stForm"]{max-width:460px;margin:0 auto;background:linear-gradient(145deg,rgba(25,30,39,.96),rgba(14,17,23,.98));border:1px solid #29313b;border-radius:22px;padding:1.5rem 1.45rem 1.35rem;box-shadow:0 22px 70px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.025)}
+[data-testid="stAppViewContainer"] [data-testid="stForm"] label{font-size:.88rem;font-weight:600;color:#dfe7ed}
+[data-testid="stAppViewContainer"] [data-testid="stForm"] input{min-height:49px!important;background:#0c1117!important;border:1px solid #27323c!important;border-radius:12px!important;color:#eef1f5!important}
+[data-testid="stAppViewContainer"] [data-testid="stForm"] input:focus{border-color:#2fe39b!important;box-shadow:0 0 0 3px rgba(47,227,155,.12)!important}
+[data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button{min-height:49px;background:linear-gradient(110deg,#65ffc5,#2fe39b 70%,#14c98a)!important;color:#05251a!important;font-weight:750!important;border:0!important;border-radius:12px!important;transition:transform .15s ease,filter .15s ease}
+[data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+[data-testid="stAppViewContainer"] [data-testid="stForm"] + div{max-width:460px;margin:0 auto}
+@media(max-width:700px){.login-head{margin:2vh auto 1.7rem}.login-logo{width:min(250px,72vw);max-height:155px}[data-testid="stAppViewContainer"] [data-testid="stForm"]{padding:1.15rem 1rem;border-radius:18px}}
 
 </style>
 """
@@ -202,7 +207,7 @@ def perfil_sidebar(nombre: str, email: str, es_admin: bool) -> str:
 
 
 def login_header(logo_path: str) -> str:
-    # Prioriza el nuevo logotipo vectorial del login; conserva el logo anterior como fallback.
+    """Cabecera de login con el logo vectorial transparente, sin bloque de fondo."""
     candidatos = [
         Path(__file__).resolve().parent.parent / "assets" / "logo-login.svg",
         Path(logo_path),
@@ -217,7 +222,7 @@ def login_header(logo_path: str) -> str:
     return (
         f'<div class="login-head">{img}'
         f'<div class="login-title">Álvaro Finanzas</div>'
-        f'<div class="login-tag">Controla tu dinero, construye tu futuro.</div></div>'
+        f'<div class="login-tag">Tu dinero. Tus decisiones. Tu futuro.</div></div>'
     )
 
 
