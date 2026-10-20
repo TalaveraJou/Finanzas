@@ -171,6 +171,17 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
     .stat-value {{ font-size:1.25rem; }}
     .fin-sub {{ font-size:.72rem; }}
 }}
+
+/* ---- Login premium Álvaro Finanzas ---- */
+.login-head { position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; margin:3vh auto 2rem; padding:18px 12px 8px; max-width:560px; }
+.login-logo { width:min(280px,70vw); height:auto; object-fit:contain; border-radius:0; box-shadow:0 14px 45px rgba(47,227,155,.10); }
+.login-title { font-weight:800; font-size:clamp(1.65rem,3vw,2.1rem); color:#eef1f5; letter-spacing:-.04em; }
+.login-tag { color:#8a92a4; font-size:.95rem; }
+.login-head + div { max-width:480px; margin-left:auto; margin-right:auto; }
+.login-head ~ div [data-testid="stTextInput"] input { min-height:48px; background:#0f1117; border:1px solid #23262f; border-radius:13px; }
+.login-head ~ div [data-testid="stButton"] button[kind="primary"] { background:linear-gradient(110deg,#65FFC5,#2fe39b 65%,#00B977); color:#04130D; border:0; min-height:48px; }
+@media(max-width:700px){.login-head{margin-top:1vh}.login-logo{width:min(235px,72vw)}}
+
 </style>
 """
 
@@ -190,11 +201,18 @@ def perfil_sidebar(nombre: str, email: str, es_admin: bool) -> str:
 
 
 def login_header(logo_path: str) -> str:
-    p = Path(logo_path)
+    # Prioriza el nuevo logotipo vectorial del login; conserva el logo anterior como fallback.
+    candidatos = [
+        Path(__file__).resolve().parent.parent / "assets" / "logo-login.svg",
+        Path(logo_path),
+    ]
     img = ""
-    if p.exists():
-        datos = base64.b64encode(p.read_bytes()).decode()
-        img = f'<img src="data:image/webp;base64,{datos}" class="login-logo">'
+    for p in candidatos:
+        if p.exists():
+            datos = base64.b64encode(p.read_bytes()).decode()
+            mime = "image/svg+xml" if p.suffix.lower() == ".svg" else "image/webp"
+            img = f'<img src="data:{mime};base64,{datos}" class="login-logo" alt="Álvaro Finanzas">'
+            break
     return (
         f'<div class="login-head">{img}'
         f'<div class="login-title">Álvaro Finanzas</div>'
