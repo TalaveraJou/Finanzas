@@ -130,8 +130,12 @@ def init_db() -> None:
         if "aportado" not in columnas_ahorros:
             conn.execute("ALTER TABLE ahorros ADD COLUMN aportado REAL NOT NULL DEFAULT 0")
             conn.execute("UPDATE ahorros SET aportado = actual")
-        if "comisiones" not in columnas_ahorros:
-            conn.execute("ALTER TABLE ahorros ADD COLUMN comisiones REAL NOT NULL DEFAULT 0")
+        try:
+            if "comisiones" not in columnas_ahorros:
+                conn.execute("ALTER TABLE ahorros ADD COLUMN comisiones REAL NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name: comisiones" not in str(e).lower():
+                raise
         if "logo" not in columnas_ahorros:
             conn.execute("ALTER TABLE ahorros ADD COLUMN logo TEXT")
         conn.execute(
