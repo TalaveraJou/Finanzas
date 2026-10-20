@@ -227,11 +227,72 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
 ::-webkit-scrollbar-track {{ background:transparent; }}
 
 @media (max-width: 768px) {{
-    .block-container {{ padding:1.2rem .8rem 2rem !important; }}
     .hero {{ padding:20px 20px 18px; border-radius:16px; }}
     .stat-value {{ font-size:1.25rem; }}
     .fin-sub {{ font-size:.72rem; }}
 }}
+
+/* ====================================================================
+   Caparazón de app nativa: cabecera fija + barra de pestañas inferior
+   fija, sin barra lateral, sin scroll lateral, con zonas seguras de
+   iPhone (notch / home indicator). Toda la app usa este caparazón; en
+   pantallas anchas queda centrada como una "ficha" con ancho de móvil.
+   ==================================================================== */
+:root {{ --app-max-width: 480px; --header-h: 64px; --nav-h: 64px; }}
+
+html, body {{ overflow-x: hidden !important; background: {BG}; overscroll-behavior-y: none; }}
+[data-testid="stAppViewContainer"] {{ overflow-x: hidden !important; }}
+[data-testid="stHeader"], [data-testid="stToolbar"],
+[data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display: none !important; }}
+/* Las barras nativas no muestran scrollbar persistente. */
+::-webkit-scrollbar {{ display: none; }}
+
+.block-container {{
+    max-width: var(--app-max-width) !important;
+    margin: 0 auto !important;
+    padding: calc(var(--header-h) + env(safe-area-inset-top) + 14px) 16px
+             calc(var(--nav-h) + env(safe-area-inset-bottom) + 24px) !important;
+}}
+
+button, [role="button"], a {{ -webkit-tap-highlight-color: transparent; }}
+input, textarea, select {{ font-size: 16px !important; }}
+
+/* ---- Cabecera fija (cristal esmerilado, sin borde: solo sombra hacia abajo) ---- */
+.st-key-app_header {{
+    position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: var(--app-max-width); z-index: 1000;
+    background: rgba(255,255,255,.85); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 1px 8px rgba(11,28,48,.04);
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px !important;
+}}
+.st-key-app_header [data-testid="stHorizontalBlock"] {{ align-items: center; }}
+.st-key-app_header [data-testid="stButton"] button {{
+    background: {CARD_HI}; border: 1px solid {BORDER}; border-radius: 999px;
+    width: 40px; height: 40px; padding: 0; font-size: 15px; color: {MUTED}; min-height: 40px;
+}}
+.app-header-brand {{ display:flex; align-items:center; gap:10px; }}
+.app-header-logo {{ width:36px; height:36px; border-radius:8px; object-fit:cover; flex-shrink:0; }}
+.app-header-text {{ min-width:0; }}
+.app-header-title {{ font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:1.02rem; letter-spacing:-.01em; color:{TEXT}; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.app-header-sub {{ color:{MUTED}; font-size:.72rem; font-weight:500; line-height:1.1; }}
+
+/* ---- Barra de pestañas inferior fija (cristal esmerilado, sombra hacia arriba) ---- */
+.st-key-bottom_nav {{
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: var(--app-max-width); z-index: 1000;
+    background: rgba(255,255,255,.9); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 -2px 12px rgba(11,28,48,.06);
+    padding-bottom: env(safe-area-inset-bottom);
+}}
+.st-key-bottom_nav iframe {{ display:block; width:100%; height:var(--nav-h) !important; }}
+
+/* Botones/inputs con área táctil cómoda (44px) en toda la app */
+.stButton button, .stDownloadButton button {{ min-height: 44px; }}
+
+/* Submenú "Más" (segmented control con los destinos secundarios) */
+.st-key-mas_subnav {{ margin: -6px 0 14px; }}
+.st-key-mas_subnav [data-testid="stSegmentedControl"] {{ width: 100%; }}
+.st-key-mas_subnav label {{ flex: 1 1 0; }}
 </style>
 """
 
@@ -466,6 +527,25 @@ def marca_sidebar(logo_path: str = "assets/logo-login.svg", nombre: str = "") ->
             img = f'<img src="data:image/webp;base64,{datos}" class="brand-logo">'
     bienvenida = f'<div class="brand-welcome">Bienvenido, {nombre}</div>' if nombre else ""
     return f'<div class="brand">{img}{bienvenida}</div>'
+
+
+def cabecera_app(logo_path: str, nombre: str, subtitulo: str = "Gestión patrimonial") -> str:
+    """Cabecera fija de la app móvil: logo pequeño + saludo. El botón de
+    cerrar sesión se renderiza aparte (es un widget real de Streamlit, no
+    puede ir dentro de este HTML) en la misma fila mediante columnas."""
+    p = Path(logo_path)
+    img = ""
+    if p.exists():
+        mime = "image/svg+xml" if p.suffix == ".svg" else "image/png"
+        datos = base64.b64encode(p.read_bytes()).decode()
+        img = f'<img src="data:{mime};base64,{datos}" class="app-header-logo">'
+    return (
+        f'<div class="app-header-brand">{img}'
+        f'<div class="app-header-text">'
+        f'<div class="app-header-title">Hola, {nombre}</div>'
+        f'<div class="app-header-sub">{subtitulo}</div>'
+        f'</div></div>'
+    )
 
 
 def _sparkline(serie, color: str, idx: int = 0, w: int = 150, h: int = 36) -> str:
