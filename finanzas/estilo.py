@@ -371,12 +371,22 @@ def aplicar_tema_plotly(fig):
 
 
 def _icono_html(icono_o_logo: str | None) -> str:
-    """Si `icono_o_logo` es la ruta a un logo existente, lo incrusta como imagen;
-    si no, lo trata como un emoji/texto corto."""
-    if icono_o_logo and isinstance(icono_o_logo, str) and Path(icono_o_logo).exists():
+    """Si `icono_o_logo` ya es un data URI de imagen, o la ruta a un logo
+    existente (formato antiguo, antes de guardarlos en la base de datos), lo
+    incrusta como imagen; si no, lo trata como un emoji/texto corto."""
+    if not icono_o_logo or not isinstance(icono_o_logo, str):
+        return icono_o_logo or ""
+    estilo_img = 'style="width:100%;height:100%;object-fit:cover;border-radius:11px;"'
+    if icono_o_logo.startswith("data:image"):
+        return f'<img src="{icono_o_logo}" {estilo_img}>'
+    try:
+        existe = Path(icono_o_logo).exists()
+    except OSError:
+        existe = False
+    if existe:
         datos = base64.b64encode(Path(icono_o_logo).read_bytes()).decode()
-        return f'<img src="data:image/png;base64,{datos}" style="width:100%;height:100%;object-fit:cover;border-radius:11px;">'
-    return icono_o_logo or ""
+        return f'<img src="data:image/png;base64,{datos}" {estilo_img}>'
+    return ""
 
 
 def fila_movimiento(icono: str | None, nombre: str, sub: str, importe: float) -> str:

@@ -1,4 +1,6 @@
+import base64
 import datetime as dt
+import io
 from pathlib import Path
 
 import pandas as pd
@@ -8,8 +10,6 @@ from PIL import Image
 from streamlit_option_menu import option_menu
 
 from finanzas import auth, db, estilo, proyeccion
-
-LOGOS_DIR = Path(__file__).resolve().parent / "data" / "logos"
 LOGO_SIZE = 64
 
 st.set_page_config(page_title="Finanzas", page_icon="💶", layout="wide")
@@ -121,11 +121,32 @@ def selector_categoria(key_prefix: str, valor_actual: str | None = None) -> str:
 
 
 def _logo_valido(logo: str | None) -> bool:
-    return isinstance(logo, str) and bool(logo) and Path(logo).exists()
+    if not isinstance(logo, str) or not logo:
+        return False
+    if logo.startswith("data:image"):
+        return True
+    try:
+        return Path(logo).exists()
+    except OSError:
+        return False
 
 
-def _guardar_logo_redimensionado(archivo, ruta: Path) -> None:
-    """Recorta/escala el logo a un cuadrado de LOGO_SIZE x LOGO_SIZE, con fondo transparente."""
+def _mostrar_logo(logo: str, width: int) -> None:
+    """st.image no admite data URIs directamente: si lo es, se decodifica a
+    bytes primero; si es una ruta de archivo local (formato antiguo), se
+    pasa tal cual."""
+    if logo.startswith("data:image"):
+        cabecera, datos = logo.split(",", 1)
+        st.image(base64.b64decode(datos), width=width)
+    else:
+        st.image(logo, width=width)
+
+
+def _logo_a_data_uri(archivo) -> str:
+    """Recorta/escala el logo a un cuadrado de LOGO_SIZE x LOGO_SIZE y lo devuelve
+    como data URI base64, para guardarlo directamente en la base de datos (así
+    funciona igual en local y en cualquier despliegue, sin depender de rutas
+    de disco que no se comparten entre entornos)."""
     imagen = Image.open(archivo).convert("RGBA")
     ancho, alto = imagen.size
     lado = min(ancho, alto)
@@ -134,7 +155,10 @@ def _guardar_logo_redimensionado(archivo, ruta: Path) -> None:
         (ancho - lado) // 2 + lado, (alto - lado) // 2 + lado,
     ))
     recorte = recorte.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
-    recorte.save(ruta, format="PNG")
+    buffer = io.BytesIO()
+    recorte.save(buffer, format="PNG")
+    datos = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{datos}"
 
 
 def subir_logo(tabla: str, id_: int, key_prefix: str) -> None:
@@ -147,10 +171,8 @@ def subir_logo(tabla: str, id_: int, key_prefix: str) -> None:
         marca = f"{archivo.name}:{archivo.size}"
         clave_marca = f"{key_prefix}_logo_procesado"
         if st.session_state.get(clave_marca) != marca:
-            LOGOS_DIR.mkdir(parents=True, exist_ok=True)
-            ruta = LOGOS_DIR / f"{tabla}_{id_}.png"
-            _guardar_logo_redimensionado(archivo, ruta)
-            db.actualizar_logo(tabla, id_, str(ruta))
+            data_uri = _logo_a_data_uri(archivo)
+            db.actualizar_logo(tabla, id_, data_uri)
             st.session_state[clave_marca] = marca
             st.rerun()
 
@@ -167,7 +189,7 @@ def tarjeta_desplegable(logo_path: str | None, titulo: str, key: str):
         col_logo, col_boton = st.columns([1, 11], vertical_alignment="center")
         with col_logo:
             if _logo_valido(logo_path):
-                st.image(logo_path, width=40)
+                _mostrar_logo(logo_path, width=40)
             else:
                 inicial = (titulo or "?").strip()[:1].upper()
                 st.markdown(f'<div class="card-ic">{inicial}</div>', unsafe_allow_html=True)
