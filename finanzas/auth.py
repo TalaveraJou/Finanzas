@@ -93,20 +93,24 @@ def _pantalla_login() -> None:
         if email_pendiente:
             st.markdown("#### Crea tu contraseña")
             st.caption(f"Primer acceso de **{email_pendiente}**")
-            p1 = st.text_input("Contraseña", type="password", key="pw_nueva")
-            p2 = st.text_input("Repite la contraseña", type="password", key="pw_nueva2")
-            if st.button("Guardar y entrar", use_container_width=True, type="primary"):
-                _guardar_password(email_pendiente, p1, p2)
+            # Dentro de un form los valores se envían juntos al pulsar el botón,
+            # así no se pierde la contraseña por latencia (campo suelto + clic).
+            with st.form("crear_password", clear_on_submit=False):
+                p1 = st.text_input("Contraseña", type="password")
+                p2 = st.text_input("Repite la contraseña", type="password")
+                if st.form_submit_button("Guardar y entrar", use_container_width=True, type="primary"):
+                    _guardar_password(email_pendiente, p1, p2)
             if st.button("← Volver", use_container_width=True):
                 st.session_state.pop("set_pw_email", None)
                 st.rerun()
         else:
             st.markdown("#### Bienvenido de nuevo")
             st.caption("Inicia sesión en Álvaro Finanzas")
-            email = st.text_input("Email", placeholder="tu@email.com", key="login_email")
-            password = st.text_input("Contraseña", type="password", placeholder="Tu contraseña", key="login_pw")
-            if st.button("Iniciar sesión", use_container_width=True, type="primary"):
-                _procesar_login(email, password)
+            with st.form("login", clear_on_submit=False):
+                email = st.text_input("Email", placeholder="tu@email.com")
+                password = st.text_input("Contraseña", type="password", placeholder="Tu contraseña")
+                if st.form_submit_button("Iniciar sesión", use_container_width=True, type="primary"):
+                    _procesar_login(email, password)
 
 
 def require_login() -> dict:
