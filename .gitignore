@@ -5,3 +5,6 @@ data/logos/
 *.csv
 .venv/
 __pycache__/
+
+# Secretos (cadena de conexión a Supabase, etc.)
+.streamlit/secrets.toml
