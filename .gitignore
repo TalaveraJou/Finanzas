@@ -1,6 +1,7 @@
 # Datos personales: nunca al repositorio
 data/*.db
 data/raw/
+data/logos/
 *.csv
 .venv/
 __pycache__/
