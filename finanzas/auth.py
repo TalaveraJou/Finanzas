@@ -109,24 +109,21 @@ def _pantalla_login() -> None:
                 st.session_state.pop("set_pw_email", None)
                 st.rerun()
         else:
-            st.markdown(
-                '<div class="lg-head"><h2>Bienvenido de nuevo</h2>'
-                '<p>Inicia sesión en Álvaro Finanzas</p></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown(estilo.login_cabecera_derecha(), unsafe_allow_html=True)
+            st.markdown('<div class="lg-head"><h2>Acceso a Clientes</h2></div>', unsafe_allow_html=True)
             with st.form("login", clear_on_submit=False):
-                email = st.text_input("Email", placeholder="tu@email.com")
-                password = st.text_input("Contraseña", type="password", placeholder="Tu contraseña")
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.checkbox("Recordarme", value=True)
-                with c2:
-                    st.markdown('<div class="lg-forgot">¿Has olvidado tu contraseña?</div>', unsafe_allow_html=True)
-                if st.form_submit_button("Iniciar sesión", use_container_width=True, type="primary"):
+                email = st.text_input(
+                    "Correo electrónico o Identificador de Acceso", placeholder="usuario@institucion.com",
+                )
+                password = st.text_input("Contraseña maestra", type="password", placeholder="Tu contraseña")
+                st.markdown('<div class="lg-forgot">¿Olvidaste tu contraseña?</div>', unsafe_allow_html=True)
+                st.checkbox("Mantener sesión iniciada en este equipo", value=True)
+                if st.form_submit_button("Iniciar Sesión en Álvaro Finanzas", use_container_width=True, type="primary"):
                     _procesar_login(email, password)
-            st.markdown('<div class="lg-divider"><span>o</span></div>', unsafe_allow_html=True)
-            if st.button("🔑  Acceder con clave de acceso", use_container_width=True, key="passkey_btn"):
+            st.markdown('<div class="lg-divider">O accede de forma segura con</div>', unsafe_allow_html=True)
+            if st.button("🔑  Clave Digital / Passkey / Biometría   ·  FIDO2", use_container_width=True, key="passkey_btn"):
                 st.info("La clave de acceso (passkey) aún no está disponible. Entra con tu email y contraseña.")
+            st.markdown(estilo.login_footer(), unsafe_allow_html=True)
 
 
 def require_login() -> dict:

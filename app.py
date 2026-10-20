@@ -50,13 +50,13 @@ with st.sidebar:
         icons=iconos,
         default_index=0,
         styles={
-            "container": {"padding": "0", "background-color": estilo.BG},
-            "icon": {"color": estilo.VERDE, "font-size": "16px"},
+            "container": {"padding": "0", "background-color": estilo.BG_SOFT},
+            "icon": {"color": estilo.ACCENT, "font-size": "16px"},
             "nav-link": {
                 "font-size": "15px", "text-align": "left", "margin": "2px",
-                "border-radius": "10px", "color": estilo.TEXT, "white-space": "nowrap",
+                "border-radius": "8px", "color": estilo.TEXT, "white-space": "nowrap",
             },
-            "nav-link-selected": {"background-color": estilo.VERDE, "color": "#06240f"},
+            "nav-link-selected": {"background-color": estilo.ACCENT, "color": "#ffffff"},
         },
     )
     st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
@@ -400,7 +400,7 @@ if pagina == "Inicio":
                     resumen_ord = resumen.copy()
                     resumen_ord["acumulado"] = resumen_ord["balance"].cumsum()
                     fig_linea = px.area(resumen_ord, x="periodo", y="acumulado", labels={"acumulado": "€", "periodo": "Mes"})
-                    fig_linea.update_traces(line_color=estilo.VERDE, fillcolor="rgba(34,197,94,0.15)")
+                    fig_linea.update_traces(line_color=estilo.VERDE, fillcolor="rgba(16,185,129,0.15)")
                     estilo.aplicar_tema_plotly(fig_linea)
                     fig_linea.update_layout(height=260)
                     st.plotly_chart(fig_linea, width="stretch")
