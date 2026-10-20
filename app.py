@@ -243,69 +243,187 @@ if pagina == "Inicio":
             [ahorro_total * (0.6 + 0.4 * i / (n - 1)) for i in range(n)] if n > 1 else [ahorro_total, ahorro_total]
         )
 
-        tarjetas_todas = [
-            {"key": "patrimonio", "icono": "◆", "label": "Patrimonio neto", "valor": f"{patrimonio_neto:,.0f} €", "serie": s_pat or s_bal, "color": estilo.VERDE},
-            {"key": "ingresos", "icono": "↑", "label": "Ingresos", "valor": f"{ingresos_mes:,.0f} €", "serie": s_ing, "color": estilo.VERDE},
-            {"key": "gastos", "icono": "↓", "label": "Gastos", "valor": f"{gastos_mes:,.0f} €", "serie": s_gas, "color": estilo.ROJO},
-            {"key": "balance", "icono": "≈", "label": "Balance", "valor": f"{balance_mes:,.0f} €", "serie": s_bal, "color": estilo.AZUL},
-            {"key": "deuda", "icono": "▭", "label": "Deuda pendiente", "valor": f"{deuda_pendiente:,.0f} €", "serie": s_deuda, "color": estilo.NARANJA},
-            {"key": "ahorrado", "icono": "◎", "label": "Ahorrado", "valor": f"{ahorro_total:,.0f} €", "serie": s_ahorro, "color": estilo.MORADO},
-        ]
-        claves_todas = [t["key"] for t in tarjetas_todas]
-        guardadas = [k for k in db.get_preferencia("kpis_inicio", ",".join(claves_todas)).split(",") if k in claves_todas]
-        if not guardadas:
-            guardadas = claves_todas
+        logos_cuenta = dict(zip(cuentas["nombre"], cuentas.get("logo", pd.Series(dtype=str))))
 
-        cab1, cab2 = st.columns([5, 1], vertical_alignment="center")
-        cab1.caption(f"Resumen de {MESES_NOMBRE[mes_actual.month - 1]} {mes_actual.year}")
-        with cab2.popover("⚙️ Personalizar", use_container_width=True):
-            with st.form("form_kpis", border=False):
-                st.markdown("**KPIs a mostrar en Inicio**")
-                marcados = {
-                    t["key"]: st.checkbox(t["label"], value=(t["key"] in guardadas), key=f"kpi_{t['key']}")
-                    for t in tarjetas_todas
-                }
-                if st.form_submit_button("Aplicar", type="primary", use_container_width=True):
-                    nueva = [k for k, v in marcados.items() if v] or [claves_todas[0]]
-                    db.set_preferencia("kpis_inicio", ",".join(nueva))
-                    st.rerun()
+        # ---- Cabecera de saludo ----
+        nombre_usuario = (auth.usuario_actual() or {}).get("nombre") or "ahí"
+        delta_pat_pct = 0.0
+        delta_pat_eur = 0.0
+        if s_pat and len(s_pat) >= 2 and s_pat[-2]:
+            delta_pat_eur = s_pat[-1] - s_pat[-2]
+            delta_pat_pct = (delta_pat_eur / abs(s_pat[-2])) * 100 if s_pat[-2] else 0.0
+        clase_delta = "pos" if delta_pat_eur >= 0 else "neg"
+        signo = "+" if delta_pat_eur >= 0 else ""
+        st.markdown(
+            f'<div class="dash-greet">Hola {nombre_usuario}, tu patrimonio neto '
+            f'{"creció" if delta_pat_eur >= 0 else "bajó"} un <span class="{clase_delta}">{signo}{delta_pat_pct:.1f}%</span> este mes</div>'
+            f'<div class="dash-sub">Balance de {MESES_NOMBRE[mes_actual.month - 1]}: {balance_mes:,.0f} € · '
+            f'{signo}{delta_pat_eur:,.0f} € frente al mes anterior</div>',
+            unsafe_allow_html=True,
+        )
 
-        tarjetas = [t for t in tarjetas_todas if t["key"] in guardadas]
-        st.markdown(estilo.tarjetas_stats(tarjetas), unsafe_allow_html=True)
+        # ---- KPIs principales ----
+        liquidez = ahorros.loc[ahorros["tipo"] == "ahorro", "actual"].sum() if not ahorros.empty else 0.0
+        cartera_inversion = ahorros.loc[ahorros["tipo"] == "inversión", "actual"].sum() if not ahorros.empty else 0.0
+        tasa_ahorro = (ahorro_mes / ingresos_mes * 100) if ingresos_mes else 0.0
+        meta_ahorro = 40.0
 
-        tab_resumen, tab_mes, tab_graficos, tab_deudas = st.tabs(["Resumen", "Por mes", "Gráficos", "Deudas activas"])
+        kpis_html = (
+            estilo.tarjeta_kpi_pro(
+                "◆", "Patrimonio neto total", f"{patrimonio_neto:,.0f} €",
+                f"{'↑' if delta_pat_eur >= 0 else '↓'} {signo}{delta_pat_pct:.1f}% · {signo}{delta_pat_eur:,.0f} € este mes",
+                clase_delta,
+            )
+            + estilo.tarjeta_kpi_pro("💶", "Liquidez disponible", f"{liquidez:,.0f} €", "Ahorro en cuentas remuneradas y depósitos")
+            + estilo.tarjeta_kpi_pro("📈", "Cartera de inversión", f"{cartera_inversion:,.0f} €", "Fondos, ETF, acciones y cripto")
+            + estilo.tarjeta_kpi_pro(
+                "🐷", "Tasa de ahorro mensual", f"{tasa_ahorro:,.1f} %",
+                f"Meta: {meta_ahorro:.0f} %", progreso=tasa_ahorro / meta_ahorro if meta_ahorro else 0,
+            )
+        )
+        st.markdown(f'<div class="kpi-row">{kpis_html}</div>', unsafe_allow_html=True)
+
+        # ---- Evolución + distribución de activos ----
+        # Serie histórica (meses pasados hasta hoy), distinta de las sparklines de
+        # las tarjetas KPI (que miran también hacia adelante para la proyección).
+        periodos_hist = proyeccion.meses_entre(mes_actual - 23, mes_actual)
+        detalle_hist = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos_hist)
+        resumen_hist = proyeccion.tabla_resumen_mensual(detalle_hist)
+        periodos_hist_str = [str(p) for p in periodos_hist]
+        resumen_hist = (
+            resumen_hist.set_index("periodo").reindex(periodos_hist_str, fill_value=0).reset_index(names="periodo")
+            if not resumen_hist.empty else pd.DataFrame({"periodo": periodos_hist_str, "balance": 0})
+        )
+        s_bal_hist = resumen_hist["balance"].tolist()
+        s_pat_hist = list(pd.Series(s_bal_hist, dtype="float64").cumsum())
+
+        col_izq, col_der = st.columns([2, 1])
+        with col_izq:
+            with st.container(border=True):
+                c1, c2 = st.columns([2, 1], vertical_alignment="center")
+                c1.markdown("**Evolución y rendimiento acumulado**")
+                rango = c2.segmented_control(
+                    "Rango", ["3M", "6M", "1A", "Histórico"], default="1A",
+                    key="rango_evolucion", label_visibility="collapsed",
+                )
+                largo = {"3M": 3, "6M": 6, "1A": 12, "Histórico": len(s_bal_hist)}.get(rango, 12)
+                serie_rango = s_pat_hist[-largo:] if largo else s_pat_hist
+                periodos_rango = periodos_hist_str[-largo:] if largo else periodos_hist_str
+                if serie_rango:
+                    fig_evo = px.area(
+                        x=periodos_rango or list(range(len(serie_rango))), y=serie_rango,
+                        labels={"x": "Mes", "y": "€"},
+                    )
+                    fig_evo.update_traces(line_color=estilo.ACCENT, fillcolor="rgba(37,99,235,0.12)")
+                    estilo.aplicar_tema_plotly(fig_evo)
+                    fig_evo.update_xaxes(type="category")
+                    fig_evo.update_layout(height=280)
+                    st.plotly_chart(fig_evo, width="stretch")
+
+                    aportado_acum = ahorros["aportado"].sum() if not ahorros.empty else 0.0
+                    plusvalia_neta = (
+                        (ahorros["actual"] - ahorros["aportado"] - ahorros["comisiones"]).sum()
+                        if not ahorros.empty else 0.0
+                    )
+                    pico = serie_rango[0]
+                    peor_caida = 0.0
+                    for v in serie_rango:
+                        pico = max(pico, v)
+                        if pico:
+                            peor_caida = min(peor_caida, (v - pico) / abs(pico) * 100)
+                    st.markdown(
+                        estilo.pie_estadisticas([
+                            ("Aportado acumulado", f"{aportado_acum:,.0f} €"),
+                            ("Plusvalía neta", f"{plusvalia_neta:,.0f} €"),
+                            ("Máximo retroceso", f"{peor_caida:.1f} %"),
+                        ]),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption("Añade cuentas, conceptos recurrentes o movimientos para ver la evolución.")
+        with col_der:
+            with st.container(border=True):
+                st.markdown("**Distribución de activos**")
+                if not ahorros.empty and ahorros["actual"].sum() > 0:
+                    por_instrumento = ahorros.groupby("instrumento")["actual"].sum().sort_values(ascending=False)
+                    total_activos = por_instrumento.sum()
+                    fig_dist = px.pie(
+                        names=por_instrumento.index, values=por_instrumento.values, hole=0.62,
+                    )
+                    estilo.aplicar_tema_plotly(fig_dist)
+                    fig_dist.update_layout(height=200, showlegend=False, margin=dict(l=0, r=0, t=0, b=0))
+                    fig_dist.update_traces(textinfo="none")
+                    st.plotly_chart(fig_dist, width="stretch")
+                    colores_ciclo = estilo.PALETA_CATEGORIAS
+                    leyenda = "".join(
+                        estilo.fila_leyenda(
+                            colores_ciclo[i % len(colores_ciclo)], (instr or "Sin clasificar"), valor,
+                            (valor / total_activos * 100) if total_activos else 0,
+                        )
+                        for i, (instr, valor) in enumerate(por_instrumento.items())
+                    )
+                    st.markdown(leyenda, unsafe_allow_html=True)
+                else:
+                    st.caption("Añade ahorros o inversiones para ver la distribución.")
+
+        # ---- Movimientos recientes + avisos ----
+        col_izq, col_der = st.columns([2, 1])
+        with col_izq:
+            st.markdown("**Últimos movimientos relevantes**")
+            with st.container(border=True):
+                if movimientos.empty:
+                    st.caption("Aún no hay movimientos puntuales.")
+                else:
+                    for row in movimientos.head(6).itertuples():
+                        logo = logos_cuenta.get(row.cuenta)
+                        icono = logo if (isinstance(logo, str) and logo) else ("⬆️" if row.importe > 0 else "⬇️")
+                        sub = f"{row.cuenta or 'sin cuenta'} · {row.fecha.strftime('%d %b')}"
+                        st.markdown(
+                            estilo.fila_movimiento(icono, row.concepto, sub, row.importe),
+                            unsafe_allow_html=True,
+                        )
+        with col_der:
+            st.markdown("**Estado y próximos hitos**")
+            emergencia = ahorros[ahorros["nombre"].str.contains("emergencia", case=False, na=False)] if not ahorros.empty else ahorros
+            if not emergencia.empty and gastos_mes:
+                fila_emg = emergencia.iloc[0]
+                meses_cubiertos = fila_emg["actual"] / gastos_mes
+                st.markdown(
+                    estilo.tarjeta_info(
+                        "ok" if meses_cubiertos >= 3 else "info", "Salud fiduciaria",
+                        "Fondo de emergencia" + (" cubierto" if meses_cubiertos >= 3 else ""),
+                        f"Tu liquidez de \"{fila_emg['nombre']}\" cubre {meses_cubiertos:.1f} meses de gastos actuales.",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            aportacion_prog = ahorros[ahorros["aportacion_mensual"].notna() & (ahorros["aportacion_mensual"] > 0)] if not ahorros.empty else ahorros
+            if not aportacion_prog.empty:
+                fila_ap = aportacion_prog.iloc[0]
+                st.markdown(
+                    estilo.tarjeta_info(
+                        "info", "Próximo hito", "Aportación periódica programada",
+                        f"\"{fila_ap['nombre']}\" recibirá {fila_ap['aportacion_mensual']:,.0f} €/mes de forma automática.",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            if emergencia.empty and aportacion_prog.empty:
+                st.caption("Sin avisos por ahora.")
+
+        tab_resumen, tab_mes, tab_graficos, tab_deudas = st.tabs(["Por cuenta", "Por mes", "Gráficos", "Deudas activas"])
 
         with tab_resumen:
-            logos_cuenta = dict(zip(cuentas["nombre"], cuentas.get("logo", pd.Series(dtype=str))))
-            col_izq, col_der = st.columns([1.2, 1])
-            with col_izq:
-                st.markdown("**Últimos movimientos**")
-                with st.container(border=True):
-                    if movimientos.empty:
-                        st.caption("Aún no hay movimientos puntuales.")
-                    else:
-                        for row in movimientos.head(6).itertuples():
-                            logo = logos_cuenta.get(row.cuenta)
-                            icono = logo if (isinstance(logo, str) and logo) else ("⬆️" if row.importe > 0 else "⬇️")
-                            sub = f"{row.cuenta or 'sin cuenta'} · {row.fecha.strftime('%d %b')}"
-                            st.markdown(
-                                estilo.fila_movimiento(icono, row.concepto, sub, row.importe),
-                                unsafe_allow_html=True,
-                            )
-            with col_der:
-                st.markdown("**Por cuenta este mes**")
-                por_cuenta = proyeccion.tabla_por_cuenta(detalle, mes_actual)
-                with st.container(border=True):
-                    if por_cuenta.empty:
-                        st.caption("Añade cuentas, conceptos recurrentes o movimientos para ver el resumen.")
-                    else:
-                        for fila in por_cuenta.itertuples():
-                            st.markdown(
-                                estilo.fila_cuenta(
-                                    logos_cuenta.get(fila.cuenta), fila.cuenta, fila.ingresos, fila.gastos, fila.balance,
-                                ),
-                                unsafe_allow_html=True,
-                            )
+            por_cuenta = proyeccion.tabla_por_cuenta(detalle, mes_actual)
+            with st.container(border=True):
+                if por_cuenta.empty:
+                    st.caption("Añade cuentas, conceptos recurrentes o movimientos para ver el resumen.")
+                else:
+                    for fila in por_cuenta.itertuples():
+                        st.markdown(
+                            estilo.fila_cuenta(
+                                logos_cuenta.get(fila.cuenta), fila.cuenta, fila.ingresos, fila.gastos, fila.balance,
+                            ),
+                            unsafe_allow_html=True,
+                        )
 
         with tab_mes:
             periodos_mes = proyeccion.meses_entre(mes_actual - 12, mes_actual + 11)

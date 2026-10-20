@@ -156,6 +156,46 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
 [data-testid="stProgress"] div[role="progressbar"] > div {{ background:{VERDE} !important; }}
 [data-testid="stFileUploader"] section {{ border-radius:14px; border:1px dashed {BORDER}; background:{CARD}; }}
 
+/* ---- Dashboard: cabecera de saludo ---- */
+.dash-greet {{ font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(1.3rem,2.4vw,1.7rem); font-weight:800; color:{TEXT}; letter-spacing:-.02em; margin-bottom:4px; }}
+.dash-greet .pos {{ color:{VERDE_TXT}; }}
+.dash-greet .neg {{ color:{ROJO_TXT}; }}
+.dash-sub {{ color:{MUTED}; font-size:.9rem; margin-bottom:18px; }}
+
+/* ---- KPI "pro" (dashboard principal) ---- */
+.kpi-row {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:20px; }}
+.kpi-pro {{ border:1px solid {BORDER}; border-radius:16px; padding:18px 20px; background:{CARD}; box-shadow:0 1px 2px rgba(15,23,42,.03); }}
+.kpi-pro-top {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }}
+.kpi-pro-label {{ color:{MUTED}; font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }}
+.kpi-pro-ic {{ width:30px; height:30px; border-radius:9px; background:{CARD_HI}; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }}
+.kpi-pro-val {{ font-family:'Plus Jakarta Sans',sans-serif; font-size:1.6rem; font-weight:800; color:{TEXT}; letter-spacing:-.03em; margin-bottom:8px; font-variant-numeric:tabular-nums; }}
+.kpi-pro-chip {{ font-size:.78rem; font-weight:600; color:{MUTED}; }}
+.kpi-pro-chip.pos {{ color:{VERDE_TXT}; }}
+.kpi-pro-chip.neg {{ color:{ROJO_TXT}; }}
+.kpi-pro-bar {{ height:6px; border-radius:999px; background:{CARD_HI}; margin-top:12px; overflow:hidden; }}
+.kpi-pro-bar > div {{ height:100%; background:{ACCENT}; border-radius:999px; }}
+
+/* ---- Leyenda de donut / distribución ---- */
+.leg-row {{ display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid {BORDER}; font-size:.85rem; }}
+.leg-row:last-child {{ border-bottom:none; }}
+.leg-left {{ display:flex; align-items:center; gap:9px; color:{TEXT}; font-weight:600; min-width:0; }}
+.leg-dot {{ width:10px; height:10px; border-radius:50%; flex-shrink:0; }}
+.leg-val {{ color:{MUTED}; font-variant-numeric:tabular-nums; white-space:nowrap; padding-left:10px; }}
+
+/* ---- Tarjetas de aviso (salud / próximo hito) ---- */
+.info-card {{ border:1px solid {BORDER}; border-radius:16px; padding:16px 18px; background:{CARD}; margin-bottom:12px; }}
+.info-card .tag {{ font-size:.7rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }}
+.info-card.ok .tag {{ color:{VERDE_TXT}; }}
+.info-card.info .tag {{ color:{ACCENT}; }}
+.info-card h4 {{ margin:7px 0 4px; font-size:.96rem; color:{TEXT}; font-weight:700; }}
+.info-card p {{ margin:0; font-size:.82rem; color:{MUTED}; line-height:1.5; }}
+
+/* ---- Pie de estadísticas bajo un gráfico ---- */
+.stat-foot {{ display:flex; gap:24px; margin-top:10px; flex-wrap:wrap; }}
+.stat-foot .item {{ display:flex; flex-direction:column; gap:3px; }}
+.stat-foot .lbl {{ color:{MUTED}; font-size:.74rem; }}
+.stat-foot .val {{ color:{TEXT}; font-weight:700; font-size:.95rem; font-variant-numeric:tabular-nums; }}
+
 /* ---- Listas de filas (movimientos, cuentas) ---- */
 .fin-row {{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 4px; border-bottom:1px solid {BORDER}; }}
 .fin-row:last-child {{ border-bottom:none; }}
@@ -461,6 +501,48 @@ def tarjetas_stats(cards: list[dict]) -> str:
     return f'<div class="scards">{cuerpo}</div>'
 
 
+def tarjeta_kpi_pro(
+    icono: str, label: str, valor: str, chip_texto: str, chip_tono: str = "",
+    progreso: float | None = None, meta_texto: str = "",
+) -> str:
+    """Tarjeta KPI estilo 'wealth dashboard': icono, etiqueta, valor grande y
+    una línea de contexto (chip) debajo, con barra de progreso opcional."""
+    clase_chip = f"kpi-pro-chip {chip_tono}".strip()
+    barra = ""
+    if progreso is not None:
+        pct = max(0.0, min(progreso, 1.0)) * 100
+        barra = (
+            f'<div class="kpi-pro-bar"><div style="width:{pct:.0f}%"></div></div>'
+            + (f'<div class="kpi-pro-chip" style="margin-top:4px;">{meta_texto}</div>' if meta_texto else "")
+        )
+    return (
+        f'<div class="kpi-pro"><div class="kpi-pro-top">'
+        f'<span class="kpi-pro-label">{label}</span><span class="kpi-pro-ic">{icono}</span></div>'
+        f'<div class="kpi-pro-val">{valor}</div>'
+        f'<div class="{clase_chip}">{chip_texto}</div>{barra}</div>'
+    )
+
+
+def fila_leyenda(color: str, label: str, valor: float, pct: float) -> str:
+    return (
+        f'<div class="leg-row"><div class="leg-left">'
+        f'<span class="leg-dot" style="background:{color};"></span>{label}</div>'
+        f'<div class="leg-val">{valor:,.0f} € · {pct:.0f}%</div></div>'
+    )
+
+
+def tarjeta_info(tono: str, etiqueta: str, titulo: str, texto: str) -> str:
+    return (
+        f'<div class="info-card {tono}"><div class="tag">{etiqueta}</div>'
+        f'<h4>{titulo}</h4><p>{texto}</p></div>'
+    )
+
+
+def pie_estadisticas(items: list[tuple[str, str]]) -> str:
+    cuerpo = "".join(f'<div class="item"><span class="lbl">{l}</span><span class="val">{v}</span></div>' for l, v in items)
+    return f'<div class="stat-foot">{cuerpo}</div>'
+
+
 def aplicar_tema_plotly(fig):
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -480,8 +562,10 @@ def _icono_html(icono_o_logo: str | None) -> str:
     """Si `icono_o_logo` ya es un data URI de imagen, o la ruta a un logo
     existente (formato antiguo, antes de guardarlos en la base de datos), lo
     incrusta como imagen; si no, lo trata como un emoji/texto corto."""
+    if isinstance(icono_o_logo, float):
+        return ""  # NaN (p.ej. columna `logo` vacía leída de la base de datos)
     if not icono_o_logo or not isinstance(icono_o_logo, str):
-        return icono_o_logo or ""
+        return ""
     estilo_img = 'style="width:100%;height:100%;object-fit:cover;border-radius:10px;"'
     if icono_o_logo.startswith("data:image"):
         return f'<img src="{icono_o_logo}" {estilo_img}>'
