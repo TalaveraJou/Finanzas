@@ -5,35 +5,58 @@ from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finanzas.db"
 
 
 # ---------------------------------------------------------------- Conexión ----
-# El almacenamiento es Postgres (Supabase) cuando hay una URL de conexión en
-# los secretos de Streamlit o en la variable de entorno DATABASE_URL. Si no la
-# hay, se usa un SQLite local (útil para desarrollo sin red). La API pública de
-# este módulo es idéntica en ambos casos.
+# El almacenamiento es Postgres (Supabase) cuando hay credenciales en los
+# secretos de Streamlit o en el entorno; si no, se usa un SQLite local (útil
+# para desarrollo sin red). La API pública de este módulo es idéntica en ambos
+# casos.
+#
+# Dos formas de configurar Postgres (en orden de prioridad):
+#   1. Por componentes (RECOMENDADO): DB_HOST, DB_PORT, DB_USER, DB_PASSWORD,
+#      DB_NAME. SQLAlchemy codifica la contraseña, así que puede llevar
+#      cualquier carácter especial sin tener que escaparlo a mano.
+#   2. Cadena completa: DATABASE_URL = "postgresql://usuario:pass@host:puerto/db"
+#      (aquí la contraseña sí debe ir percent-encoded si tiene símbolos raros).
 
-def _database_url() -> str | None:
+def _secret(clave: str) -> str | None:
     try:
         import streamlit as st
 
-        if "DATABASE_URL" in st.secrets:
-            return str(st.secrets["DATABASE_URL"])
+        if clave in st.secrets:
+            return str(st.secrets[clave])
     except Exception:
         pass
-    return os.environ.get("DATABASE_URL")
+    return os.environ.get(clave)
+
+
+def _build_url() -> URL | str | None:
+    password = _secret("DB_PASSWORD")
+    if password:
+        return URL.create(
+            "postgresql+psycopg2",
+            username=_secret("DB_USER"),
+            password=password,
+            host=_secret("DB_HOST"),
+            port=int(_secret("DB_PORT") or 5432),
+            database=_secret("DB_NAME") or "postgres",
+        )
+    return _secret("DATABASE_URL")
 
 
 @lru_cache(maxsize=1)
 def _get_engine() -> Engine:
-    url = _database_url()
-    if url:
+    url = _build_url()
+    if url is not None:
+        drivername = url.drivername if isinstance(url, URL) else str(url)
+        es_pg = drivername.startswith("postgres")
         # Supabase (pooler) exige SSL. pool_pre_ping evita conexiones muertas
         # cuando la app de Streamlit lleva un rato dormida.
-        connect_args = {"sslmode": "require"} if url.startswith("postgres") else {}
+        connect_args = {"sslmode": "require"} if es_pg else {}
         return create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{DB_PATH}")
