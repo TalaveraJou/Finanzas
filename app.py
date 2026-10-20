@@ -39,8 +39,8 @@ with st.sidebar:
         estilo.marca_sidebar("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
         unsafe_allow_html=True,
     )
-    opciones = ["Inicio", "Cuentas"]
-    iconos = ["speedometer2", "wallet2"]
+    opciones = ["Inicio", "Flujo de Caja", "Cuentas"]
+    iconos = ["speedometer2", "arrow-left-right", "wallet2"]
     if auth.es_superadmin():
         opciones.append("Admin")
         iconos.append("shield-lock")
@@ -554,6 +554,137 @@ if pagina == "Inicio":
                             f"cuota {'fija' if row.tipo_pago == 'fijo' else 'variable'}: {info['cuota_estimada']:,.2f} € · "
                             f"quedan {restantes_txt} meses (fin estimado: {fin_txt})"
                         )
+
+# ===================================================================== Flujo de Caja ====
+
+elif pagina == "Flujo de Caja":
+    st.title("Flujo de Caja")
+
+    cuentas = db.cargar_cuentas()
+    conceptos = db.cargar_conceptos()
+    deudas = db.cargar_deudas()
+    ahorros = db.cargar_ahorros()
+    movimientos = db.cargar_movimientos()
+    valores = db.cargar_valores_mensuales()
+    presupuestos = db.cargar_presupuestos()
+
+    if cuentas.empty:
+        st.info("Empieza creando una cuenta en **Cuentas y Movimientos → Cuentas**.")
+    else:
+        hoy = pd.Timestamp.today().normalize()
+        mes_actual = hoy.to_period("M")
+        st.session_state.setdefault("flujo_offset", 0)
+
+        c_prev, c_mid, c_next = st.columns([1, 4, 1])
+        if c_prev.button("←", key="flujo_prev"):
+            st.session_state["flujo_offset"] -= 1
+            st.rerun()
+        periodo_sel = mes_actual + st.session_state["flujo_offset"]
+        c_mid.markdown(
+            f"<div style='text-align:center;font-weight:700;font-size:1.1rem;'>"
+            f"{MESES_NOMBRE[periodo_sel.month - 1]} {periodo_sel.year}</div>",
+            unsafe_allow_html=True,
+        )
+        if c_next.button("→", key="flujo_next"):
+            st.session_state["flujo_offset"] += 1
+            st.rerun()
+
+        periodos = proyeccion.meses_entre(periodo_sel, periodo_sel)
+        detalle = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos)
+        detalle_mes = detalle[detalle["periodo"] == periodo_sel] if not detalle.empty else detalle
+
+        ingresos_mes = detalle_mes.loc[detalle_mes["tipo"] == "ingreso", "importe"].sum()
+        gastos_mes = detalle_mes.loc[detalle_mes["tipo"] == "gasto", "importe"].abs().sum()
+        deuda_mes = detalle_mes.loc[detalle_mes["tipo"] == "deuda", "importe"].abs().sum()
+        ahorro_mes = detalle_mes.loc[detalle_mes["tipo"] == "ahorro", "importe"].abs().sum()
+        flujo_neto = ingresos_mes - gastos_mes - deuda_mes - ahorro_mes
+        tasa_ahorro = (ahorro_mes / ingresos_mes * 100) if ingresos_mes else 0.0
+
+        kpis_html = (
+            estilo.tarjeta_kpi_pro(
+                "⬆️", "Ingresos consolidados", f"{ingresos_mes:,.0f} €",
+                f"{int((detalle_mes['tipo'] == 'ingreso').sum())} partidas este mes",
+            )
+            + estilo.tarjeta_kpi_pro(
+                "⬇️", "Gastos devengados", f"{gastos_mes:,.0f} €",
+                f"{int((detalle_mes['tipo'] == 'gasto').sum())} partidas este mes",
+            )
+            + estilo.tarjeta_kpi_pro(
+                "⚖️", "Flujo de caja neto", f"{flujo_neto:,.0f} €",
+                f"Tasa de ahorro: {tasa_ahorro:.1f} %", "pos" if flujo_neto >= 0 else "neg",
+            )
+        )
+        st.markdown(f'<div class="kpi-row">{kpis_html}</div>', unsafe_allow_html=True)
+
+        col_izq, col_der = st.columns([3, 2])
+        with col_izq:
+            with st.container(border=True):
+                st.markdown("**Ejecución presupuestaria por partida**")
+                if presupuestos.empty:
+                    st.caption(
+                        "Fija límites por categoría en **Cuentas y Movimientos → Presupuestos** "
+                        "para ver aquí la ejecución."
+                    )
+                else:
+                    gastos_por_cat = (
+                        detalle_mes[detalle_mes["tipo"] == "gasto"].groupby("grupo")["importe"].sum().abs()
+                        if not detalle_mes.empty else pd.Series(dtype=float)
+                    )
+                    filas_presu = "".join(
+                        estilo.fila_presupuesto(
+                            row.categoria, gastos_por_cat.get(row.categoria, 0.0), row.limite_mensual,
+                        )
+                        for row in presupuestos.itertuples()
+                    )
+                    st.markdown(filas_presu, unsafe_allow_html=True)
+        with col_der:
+            with st.container(border=True):
+                st.markdown("**Distribución del flujo**")
+                remanente = max(flujo_neto, 0.0)
+                etiquetas = ["Inversión y ahorro", "Deudas", "Gastos variables", "Remanente"]
+                valores_dist = [ahorro_mes, deuda_mes, gastos_mes, remanente]
+                total_dist = sum(v for v in valores_dist if v > 0)
+                if total_dist > 0:
+                    fig_dist = px.pie(names=etiquetas, values=valores_dist, hole=0.62)
+                    estilo.aplicar_tema_plotly(fig_dist)
+                    fig_dist.update_layout(height=200, showlegend=False, margin=dict(l=0, r=0, t=0, b=0))
+                    fig_dist.update_traces(textinfo="none")
+                    st.plotly_chart(fig_dist, width="stretch")
+                    colores_ciclo = estilo.PALETA_CATEGORIAS
+                    leyenda = "".join(
+                        estilo.fila_leyenda(
+                            colores_ciclo[i % len(colores_ciclo)], etq, val,
+                            (val / total_dist * 100) if total_dist else 0,
+                        )
+                        for i, (etq, val) in enumerate(zip(etiquetas, valores_dist)) if val > 0
+                    )
+                    st.markdown(leyenda, unsafe_allow_html=True)
+                else:
+                    st.caption("Sin movimientos este mes para distribuir.")
+
+        st.markdown("**Movimientos consolidados**")
+        with st.container(border=True):
+            if detalle_mes.empty:
+                st.caption("No hay movimientos para este periodo.")
+            else:
+                tabla = detalle_mes.copy()
+                col1, col2 = st.columns(2)
+                cuentas_disp = sorted(tabla["cuenta"].dropna().unique().tolist())
+                tipos_disp = sorted(tabla["tipo"].dropna().unique().tolist())
+                f_cuentas = col1.multiselect("Cuenta", cuentas_disp, key="flujo_f_cuenta")
+                f_tipos = col2.multiselect("Tipo", tipos_disp, key="flujo_f_tipo")
+                if f_cuentas:
+                    tabla = tabla[tabla["cuenta"].isin(f_cuentas)]
+                if f_tipos:
+                    tabla = tabla[tabla["tipo"].isin(f_tipos)]
+                tabla["importe_abs"] = tabla["importe"].abs()
+                tabla_mostrar = tabla[["tipo", "cuenta", "grupo", "concepto", "importe_abs"]].rename(
+                    columns={"grupo": "categoria", "importe_abs": "importe"}
+                ).sort_values(["tipo", "cuenta", "concepto"])
+                st.dataframe(
+                    tabla_mostrar.style.format({"importe": "{:,.2f} €"}),
+                    hide_index=True, width="stretch",
+                )
 
 # ============================================= Cuentas y Movimientos ====
 

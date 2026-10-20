@@ -196,6 +196,19 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
 .stat-foot .lbl {{ color:{MUTED}; font-size:.74rem; }}
 .stat-foot .val {{ color:{TEXT}; font-weight:700; font-size:.95rem; font-variant-numeric:tabular-nums; }}
 
+/* ---- Ejecución presupuestaria por categoría ---- */
+.pres-row {{ padding:14px 0; border-bottom:1px solid {BORDER}; }}
+.pres-row:last-child {{ border-bottom:none; }}
+.pres-top {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:10px; }}
+.pres-cat {{ display:flex; align-items:center; gap:9px; font-weight:650; color:{TEXT}; font-size:.9rem; min-width:0; }}
+.pres-vals {{ font-size:.78rem; color:{MUTED}; font-variant-numeric:tabular-nums; margin-top:6px; }}
+.pres-bar {{ height:8px; border-radius:999px; background:{CARD_HI}; overflow:hidden; }}
+.pres-bar > div {{ height:100%; border-radius:999px; }}
+.pres-pill {{ font-size:.7rem; font-weight:800; padding:3px 10px; border-radius:999px; white-space:nowrap; flex-shrink:0; }}
+.pres-pill.ok {{ color:{VERDE_TXT}; background:{VERDE_BG}; }}
+.pres-pill.warn {{ color:#b45309; background:#fffbeb; }}
+.pres-pill.over {{ color:{ROJO_TXT}; background:{ROJO_BG}; }}
+
 /* ---- Listas de filas (movimientos, cuentas) ---- */
 .fin-row {{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 4px; border-bottom:1px solid {BORDER}; }}
 .fin-row:last-child {{ border-bottom:none; }}
@@ -528,6 +541,26 @@ def fila_leyenda(color: str, label: str, valor: float, pct: float) -> str:
         f'<div class="leg-row"><div class="leg-left">'
         f'<span class="leg-dot" style="background:{color};"></span>{label}</div>'
         f'<div class="leg-val">{valor:,.0f} € · {pct:.0f}%</div></div>'
+    )
+
+
+def fila_presupuesto(categoria: str, gasto: float, limite: float) -> str:
+    """Una partida de la ejecución presupuestaria: barra de progreso del gasto
+    real frente al límite mensual fijado, con una píldora de estado."""
+    pct = (gasto / limite * 100) if limite else 0.0
+    pct_barra = max(0.0, min(pct, 100.0))
+    if pct < 80:
+        tono, color_barra = "ok", VERDE
+    elif pct <= 100:
+        tono, color_barra = "warn", NARANJA
+    else:
+        tono, color_barra = "over", ROJO
+    return (
+        f'<div class="pres-row"><div class="pres-top">'
+        f'<div class="pres-cat">🏷️ {categoria}</div>'
+        f'<div class="pres-pill {tono}">{pct:.0f}%</div></div>'
+        f'<div class="pres-bar"><div style="width:{pct_barra:.0f}%;background:{color_barra};"></div></div>'
+        f'<div class="pres-vals">{gasto:,.2f} € de {limite:,.2f} €</div></div>'
     )
 
 
