@@ -11,6 +11,19 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finanzas.db"
 
 SUPERADMIN_EMAIL = "alvarotalaverajou@icloud.com"
 
+# Tablas de datos financieros: cada fila pertenece a un usuario (columna
+# `propietario`, su email). Las tablas usuarios/accesos son globales.
+TABLAS_DATOS = (
+    "cuentas", "conceptos", "deudas", "ahorros", "movimientos", "planes",
+    "categorias", "valores_mensuales",
+)
+
+CATEGORIAS_DEFECTO = (
+    "Vivienda", "Suministros", "Alimentación", "Transporte", "Salud",
+    "Ocio", "Ropa", "Educación", "Suscripciones", "Dispositivos",
+    "Deporte", "Nómina", "Freelance", "Inversiones", "Otros",
+)
+
 
 # ---------------------------------------------------------------- Conexión ----
 # El almacenamiento es Postgres (Supabase) cuando hay credenciales en los
@@ -79,10 +92,26 @@ def _pk() -> str:
     return "BIGSERIAL PRIMARY KEY" if _es_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
 
+def _propietario() -> str:
+    """Email del usuario en sesión (cada uno solo ve sus datos). Fuera de una
+    sesión de Streamlit (scripts, pruebas) se usa el superadmin."""
+    try:
+        import streamlit as st
+
+        u = st.session_state.get("usuario")
+        if u and u.get("email"):
+            return str(u["email"]).strip().lower()
+    except Exception:
+        pass
+    return SUPERADMIN_EMAIL
+
+
 # Caché de lecturas: contra una base de datos remota (Supabase) cada SELECT es
 # una ida y vuelta por red, y Streamlit reejecuta todo el script en cada clic.
 # Cacheamos los resultados y vaciamos la caché solo cuando se escribe, así las
 # interacciones no vuelven a consultar la base de datos salvo que algo cambie.
+# La caché se indexa por los parámetros (incluido `propietario`), así que no
+# mezcla datos entre usuarios.
 
 def _cache(func):
     try:
@@ -134,8 +163,9 @@ def init_db() -> None:
             f"""
             CREATE TABLE IF NOT EXISTS cuentas (
                 id {pk},
-                nombre TEXT NOT NULL UNIQUE,
-                logo TEXT
+                nombre TEXT NOT NULL,
+                logo TEXT,
+                propietario TEXT
             )
             """
         ))
@@ -154,7 +184,8 @@ def init_db() -> None:
                 meses_aplicables TEXT,
                 importes_meses TEXT,
                 logo TEXT,
-                activo INTEGER NOT NULL DEFAULT 1
+                activo INTEGER NOT NULL DEFAULT 1,
+                propietario TEXT
             )
             """
         ))
@@ -171,7 +202,8 @@ def init_db() -> None:
                 meses_total INTEGER,
                 fecha_inicio TEXT NOT NULL,
                 logo TEXT,
-                activa INTEGER NOT NULL DEFAULT 1
+                activa INTEGER NOT NULL DEFAULT 1,
+                propietario TEXT
             )
             """
         ))
@@ -190,7 +222,8 @@ def init_db() -> None:
                 aportacion_mensual REAL,
                 fecha_objetivo TEXT,
                 logo TEXT,
-                activa INTEGER NOT NULL DEFAULT 1
+                activa INTEGER NOT NULL DEFAULT 1,
+                propietario TEXT
             )
             """
         ))
@@ -202,7 +235,8 @@ def init_db() -> None:
                 fecha TEXT NOT NULL,
                 concepto TEXT NOT NULL,
                 importe REAL NOT NULL,
-                categoria TEXT NOT NULL
+                categoria TEXT NOT NULL,
+                propietario TEXT
             )
             """
         ))
@@ -214,7 +248,8 @@ def init_db() -> None:
                 descripcion TEXT,
                 importe_objetivo REAL NOT NULL,
                 fecha_objetivo TEXT,
-                notas TEXT
+                notas TEXT,
+                propietario TEXT
             )
             """
         ))
@@ -226,6 +261,7 @@ def init_db() -> None:
                 padre_id INTEGER NOT NULL,
                 periodo TEXT NOT NULL,
                 importe REAL NOT NULL,
+                propietario TEXT,
                 UNIQUE (tipo_padre, padre_id, periodo)
             )
             """
@@ -234,20 +270,11 @@ def init_db() -> None:
             f"""
             CREATE TABLE IF NOT EXISTS categorias (
                 id {pk},
-                nombre TEXT NOT NULL UNIQUE
+                nombre TEXT NOT NULL,
+                propietario TEXT
             )
             """
         ))
-        hay = conn.execute(text("SELECT COUNT(*) FROM categorias")).scalar()
-        if not hay:
-            conn.execute(
-                text("INSERT INTO categorias (nombre) VALUES (:n)"),
-                [{"n": n} for n in (
-                    "Vivienda", "Suministros", "Alimentación", "Transporte", "Salud",
-                    "Ocio", "Ropa", "Educación", "Suscripciones", "Dispositivos",
-                    "Deporte", "Nómina", "Freelance", "Inversiones", "Otros",
-                )],
-            )
         conn.execute(text(
             f"""
             CREATE TABLE IF NOT EXISTS usuarios (
@@ -273,6 +300,35 @@ def init_db() -> None:
             )
             """
         ))
+
+        # --- Migración multiusuario -------------------------------------
+        # Para bases creadas antes de añadir `propietario`: añade la columna,
+        # asigna los datos existentes al superadmin y quita los UNIQUE(nombre)
+        # que impedirían que dos usuarios tengan cuentas/categorías homónimas.
+        for tabla in TABLAS_DATOS:
+            try:
+                if _es_postgres():
+                    conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS propietario TEXT"))
+                else:
+                    cols = {r[1] for r in conn.execute(text(f"PRAGMA table_info({tabla})"))}
+                    if "propietario" not in cols:
+                        conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN propietario TEXT"))
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    text(f"UPDATE {tabla} SET propietario = :su WHERE propietario IS NULL"),
+                    {"su": SUPERADMIN_EMAIL},
+                )
+            except Exception:
+                pass
+        if _es_postgres():
+            for tabla, cons in (("cuentas", "cuentas_nombre_key"), ("categorias", "categorias_nombre_key")):
+                try:
+                    conn.execute(text(f"ALTER TABLE {tabla} DROP CONSTRAINT IF EXISTS {cons}"))
+                except Exception:
+                    pass
+
         # El superadmin existe desde el principio, sin contraseña: la crea él
         # mismo la primera vez que entra.
         conn.execute(
@@ -286,24 +342,40 @@ def init_db() -> None:
     _inicializado = True
 
 
+def _prop(propietario: str | None) -> str:
+    return (propietario or _propietario()).strip().lower()
+
+
 # ---------------------------------------------------------------- Cuentas ----
 
-def anadir_cuenta(nombre: str) -> None:
+def anadir_cuenta(nombre: str, propietario: str | None = None) -> None:
     init_db()
-    _ejecutar("INSERT INTO cuentas (nombre) VALUES (:nombre)", {"nombre": nombre})
+    _ejecutar(
+        "INSERT INTO cuentas (nombre, propietario) VALUES (:nombre, :prop)",
+        {"nombre": nombre, "prop": _prop(propietario)},
+    )
 
 
-def actualizar_cuenta_nombre(id_: int, nombre: str) -> None:
-    _ejecutar("UPDATE cuentas SET nombre = :nombre WHERE id = :id", {"nombre": nombre, "id": id_})
+def actualizar_cuenta_nombre(id_: int, nombre: str, propietario: str | None = None) -> None:
+    _ejecutar(
+        "UPDATE cuentas SET nombre = :nombre WHERE id = :id AND propietario = :prop",
+        {"nombre": nombre, "id": id_, "prop": _prop(propietario)},
+    )
 
 
-def cargar_cuentas() -> pd.DataFrame:
+def cargar_cuentas(propietario: str | None = None) -> pd.DataFrame:
     init_db()
-    return _leer("SELECT * FROM cuentas ORDER BY nombre")
+    return _leer(
+        "SELECT * FROM cuentas WHERE propietario = :prop ORDER BY nombre",
+        {"prop": _prop(propietario)},
+    )
 
 
-def eliminar_cuenta(id_: int) -> None:
-    _ejecutar("DELETE FROM cuentas WHERE id = :id", {"id": id_})
+def eliminar_cuenta(id_: int, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM cuentas WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
+    )
 
 
 # -------------------------------------------------- Conceptos recurrentes ----
@@ -322,7 +394,7 @@ def _serializar_importes_meses(importes_meses: dict[int, float] | None) -> str |
 def anadir_concepto(
     cuenta_id: int, nombre: str, tipo: str, modo: str, grupo: str, importe: float,
     fecha_inicio: dt.date, meses_duracion: int | None, meses_aplicables: list[int] | None = None,
-    importes_meses: dict[int, float] | None = None,
+    importes_meses: dict[int, float] | None = None, propietario: str | None = None,
 ) -> None:
     init_db()
     meses_txt = ",".join(str(m) for m in sorted(meses_aplicables)) if meses_aplicables else None
@@ -330,40 +402,45 @@ def anadir_concepto(
     _ejecutar(
         """INSERT INTO conceptos
            (cuenta_id, nombre, tipo, modo, grupo, importe, fecha_inicio, meses_duracion,
-            meses_aplicables, importes_meses, activo)
+            meses_aplicables, importes_meses, activo, propietario)
            VALUES (:cuenta_id, :nombre, :tipo, :modo, :grupo, :importe, :fecha_inicio,
-                   :meses_duracion, :meses_aplicables, :importes_meses, 1)""",
+                   :meses_duracion, :meses_aplicables, :importes_meses, 1, :prop)""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "tipo": tipo, "modo": modo, "grupo": grupo,
             "importe": importe, "fecha_inicio": fecha_inicio.isoformat(),
             "meses_duracion": meses_duracion, "meses_aplicables": meses_txt,
-            "importes_meses": importes_meses_txt,
+            "importes_meses": importes_meses_txt, "prop": _prop(propietario),
         },
     )
 
 
-def cargar_conceptos() -> pd.DataFrame:
+def cargar_conceptos(propietario: str | None = None) -> pd.DataFrame:
     init_db()
     df = _leer(
         """
         SELECT conceptos.*, cuentas.nombre AS cuenta
         FROM conceptos JOIN cuentas ON cuentas.id = conceptos.cuenta_id
+        WHERE conceptos.propietario = :prop
         ORDER BY cuentas.nombre, conceptos.tipo, conceptos.nombre
-        """
+        """,
+        {"prop": _prop(propietario)},
     )
     if not df.empty:
         df["activo"] = df["activo"].astype(bool)
     return df
 
 
-def actualizar_concepto_activo(id_: int, activo: bool) -> None:
-    _ejecutar("UPDATE conceptos SET activo = :activo WHERE id = :id", {"activo": int(activo), "id": id_})
+def actualizar_concepto_activo(id_: int, activo: bool, propietario: str | None = None) -> None:
+    _ejecutar(
+        "UPDATE conceptos SET activo = :activo WHERE id = :id AND propietario = :prop",
+        {"activo": int(activo), "id": id_, "prop": _prop(propietario)},
+    )
 
 
 def actualizar_concepto(
     id_: int, cuenta_id: int, nombre: str, tipo: str, modo: str, grupo: str, importe: float,
     fecha_inicio: dt.date, meses_duracion: int | None, meses_aplicables: list[int] | None,
-    importes_meses: dict[int, float] | None = None,
+    importes_meses: dict[int, float] | None = None, propietario: str | None = None,
 ) -> None:
     meses_txt = ",".join(str(m) for m in sorted(meses_aplicables)) if meses_aplicables else None
     importes_meses_txt = _serializar_importes_meses(importes_meses)
@@ -373,21 +450,22 @@ def actualizar_concepto(
                grupo = :grupo, importe = :importe, fecha_inicio = :fecha_inicio,
                meses_duracion = :meses_duracion, meses_aplicables = :meses_aplicables,
                importes_meses = :importes_meses
-           WHERE id = :id""",
+           WHERE id = :id AND propietario = :prop""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "tipo": tipo, "modo": modo, "grupo": grupo,
             "importe": importe, "fecha_inicio": fecha_inicio.isoformat(),
             "meses_duracion": meses_duracion, "meses_aplicables": meses_txt,
-            "importes_meses": importes_meses_txt, "id": id_,
+            "importes_meses": importes_meses_txt, "id": id_, "prop": _prop(propietario),
         },
     )
 
 
-def eliminar_concepto(id_: int) -> None:
-    _ejecutar("DELETE FROM conceptos WHERE id = :id", {"id": id_})
+def eliminar_concepto(id_: int, propietario: str | None = None) -> None:
+    prop = _prop(propietario)
+    _ejecutar("DELETE FROM conceptos WHERE id = :id AND propietario = :prop", {"id": id_, "prop": prop})
     _ejecutar(
-        "DELETE FROM valores_mensuales WHERE tipo_padre = 'concepto' AND padre_id = :id",
-        {"id": id_},
+        "DELETE FROM valores_mensuales WHERE tipo_padre = 'concepto' AND padre_id = :id AND propietario = :prop",
+        {"id": id_, "prop": prop},
     )
 
 
@@ -398,48 +476,51 @@ def eliminar_concepto(id_: int) -> None:
 def anadir_deuda(
     cuenta_id: int | None, nombre: str, importe_total: float, importe_pendiente: float,
     tipo_pago: str, cuota_mensual: float | None, meses_total: int | None,
-    fecha_inicio: dt.date,
+    fecha_inicio: dt.date, propietario: str | None = None,
 ) -> None:
     init_db()
     _ejecutar(
         """INSERT INTO deudas
            (cuenta_id, nombre, importe_total, importe_pendiente, tipo_pago,
-            cuota_mensual, meses_total, fecha_inicio, activa)
+            cuota_mensual, meses_total, fecha_inicio, activa, propietario)
            VALUES (:cuenta_id, :nombre, :importe_total, :importe_pendiente, :tipo_pago,
-                   :cuota_mensual, :meses_total, :fecha_inicio, 1)""",
+                   :cuota_mensual, :meses_total, :fecha_inicio, 1, :prop)""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "importe_total": importe_total,
             "importe_pendiente": importe_pendiente, "tipo_pago": tipo_pago,
             "cuota_mensual": cuota_mensual, "meses_total": meses_total,
-            "fecha_inicio": fecha_inicio.isoformat(),
+            "fecha_inicio": fecha_inicio.isoformat(), "prop": _prop(propietario),
         },
     )
 
 
-def cargar_deudas() -> pd.DataFrame:
+def cargar_deudas(propietario: str | None = None) -> pd.DataFrame:
     init_db()
     df = _leer(
         """
         SELECT deudas.*, cuentas.nombre AS cuenta
         FROM deudas LEFT JOIN cuentas ON cuentas.id = deudas.cuenta_id
+        WHERE deudas.propietario = :prop
         ORDER BY fecha_inicio
-        """
+        """,
+        {"prop": _prop(propietario)},
     )
     if not df.empty:
         df["activa"] = df["activa"].astype(bool)
     return df
 
 
-def actualizar_deuda_pendiente(id_: int, nuevo_pendiente: float) -> None:
+def actualizar_deuda_pendiente(id_: int, nuevo_pendiente: float, propietario: str | None = None) -> None:
     _ejecutar(
-        "UPDATE deudas SET importe_pendiente = :p WHERE id = :id",
-        {"p": max(nuevo_pendiente, 0.0), "id": id_},
+        "UPDATE deudas SET importe_pendiente = :p WHERE id = :id AND propietario = :prop",
+        {"p": max(nuevo_pendiente, 0.0), "id": id_, "prop": _prop(propietario)},
     )
 
 
 def actualizar_deuda(
     id_: int, cuenta_id: int | None, nombre: str, importe_total: float, importe_pendiente: float,
     tipo_pago: str, cuota_mensual: float | None, meses_total: int | None, fecha_inicio: dt.date,
+    propietario: str | None = None,
 ) -> None:
     _ejecutar(
         """UPDATE deudas SET
@@ -447,25 +528,29 @@ def actualizar_deuda(
                importe_pendiente = :importe_pendiente, tipo_pago = :tipo_pago,
                cuota_mensual = :cuota_mensual, meses_total = :meses_total,
                fecha_inicio = :fecha_inicio
-           WHERE id = :id""",
+           WHERE id = :id AND propietario = :prop""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "importe_total": importe_total,
             "importe_pendiente": max(importe_pendiente, 0.0), "tipo_pago": tipo_pago,
             "cuota_mensual": cuota_mensual, "meses_total": meses_total,
-            "fecha_inicio": fecha_inicio.isoformat(), "id": id_,
+            "fecha_inicio": fecha_inicio.isoformat(), "id": id_, "prop": _prop(propietario),
         },
     )
 
 
-def actualizar_deuda_activa(id_: int, activa: bool) -> None:
-    _ejecutar("UPDATE deudas SET activa = :activa WHERE id = :id", {"activa": int(activa), "id": id_})
-
-
-def eliminar_deuda(id_: int) -> None:
-    _ejecutar("DELETE FROM deudas WHERE id = :id", {"id": id_})
+def actualizar_deuda_activa(id_: int, activa: bool, propietario: str | None = None) -> None:
     _ejecutar(
-        "DELETE FROM valores_mensuales WHERE tipo_padre = 'deuda' AND padre_id = :id",
-        {"id": id_},
+        "UPDATE deudas SET activa = :activa WHERE id = :id AND propietario = :prop",
+        {"activa": int(activa), "id": id_, "prop": _prop(propietario)},
+    )
+
+
+def eliminar_deuda(id_: int, propietario: str | None = None) -> None:
+    prop = _prop(propietario)
+    _ejecutar("DELETE FROM deudas WHERE id = :id AND propietario = :prop", {"id": id_, "prop": prop})
+    _ejecutar(
+        "DELETE FROM valores_mensuales WHERE tipo_padre = 'deuda' AND padre_id = :id AND propietario = :prop",
+        {"id": id_, "prop": prop},
     )
 
 
@@ -474,68 +559,81 @@ def eliminar_deuda(id_: int) -> None:
 def anadir_ahorro(
     cuenta_id: int | None, nombre: str, tipo: str, instrumento: str,
     objetivo: float, aportado: float, actual: float, comisiones: float,
-    aportacion_mensual: float | None, fecha_objetivo: dt.date | None,
+    aportacion_mensual: float | None, fecha_objetivo: dt.date | None, propietario: str | None = None,
 ) -> None:
     init_db()
     _ejecutar(
         """INSERT INTO ahorros
            (cuenta_id, nombre, tipo, instrumento, objetivo, aportado, actual, comisiones,
-            aportacion_mensual, fecha_objetivo, activa)
+            aportacion_mensual, fecha_objetivo, activa, propietario)
            VALUES (:cuenta_id, :nombre, :tipo, :instrumento, :objetivo, :aportado, :actual,
-                   :comisiones, :aportacion_mensual, :fecha_objetivo, 1)""",
+                   :comisiones, :aportacion_mensual, :fecha_objetivo, 1, :prop)""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "tipo": tipo, "instrumento": instrumento,
             "objetivo": objetivo, "aportado": aportado, "actual": actual, "comisiones": comisiones,
             "aportacion_mensual": aportacion_mensual,
             "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None,
+            "prop": _prop(propietario),
         },
     )
 
 
-def cargar_ahorros() -> pd.DataFrame:
+def cargar_ahorros(propietario: str | None = None) -> pd.DataFrame:
     init_db()
     df = _leer(
         """
         SELECT ahorros.*, cuentas.nombre AS cuenta
         FROM ahorros LEFT JOIN cuentas ON cuentas.id = ahorros.cuenta_id
+        WHERE ahorros.propietario = :prop
         ORDER BY ahorros.id
-        """
+        """,
+        {"prop": _prop(propietario)},
     )
     if not df.empty:
         df["activa"] = df["activa"].astype(bool)
     return df
 
 
-def actualizar_ahorro_actual(id_: int, nuevo_actual: float) -> None:
-    _ejecutar("UPDATE ahorros SET actual = :a WHERE id = :id", {"a": nuevo_actual, "id": id_})
+def actualizar_ahorro_actual(id_: int, nuevo_actual: float, propietario: str | None = None) -> None:
+    _ejecutar(
+        "UPDATE ahorros SET actual = :a WHERE id = :id AND propietario = :prop",
+        {"a": nuevo_actual, "id": id_, "prop": _prop(propietario)},
+    )
 
 
 def actualizar_ahorro(
     id_: int, cuenta_id: int | None, nombre: str, tipo: str, instrumento: str,
     objetivo: float, aportado: float, actual: float, comisiones: float,
-    aportacion_mensual: float | None, fecha_objetivo: dt.date | None,
+    aportacion_mensual: float | None, fecha_objetivo: dt.date | None, propietario: str | None = None,
 ) -> None:
     _ejecutar(
         """UPDATE ahorros SET
                cuenta_id = :cuenta_id, nombre = :nombre, tipo = :tipo, instrumento = :instrumento,
                objetivo = :objetivo, aportado = :aportado, actual = :actual, comisiones = :comisiones,
                aportacion_mensual = :aportacion_mensual, fecha_objetivo = :fecha_objetivo
-           WHERE id = :id""",
+           WHERE id = :id AND propietario = :prop""",
         {
             "cuenta_id": cuenta_id, "nombre": nombre, "tipo": tipo, "instrumento": instrumento,
             "objetivo": objetivo, "aportado": aportado, "actual": actual, "comisiones": comisiones,
             "aportacion_mensual": aportacion_mensual,
-            "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None, "id": id_,
+            "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None,
+            "id": id_, "prop": _prop(propietario),
         },
     )
 
 
-def actualizar_ahorro_activa(id_: int, activa: bool) -> None:
-    _ejecutar("UPDATE ahorros SET activa = :activa WHERE id = :id", {"activa": int(activa), "id": id_})
+def actualizar_ahorro_activa(id_: int, activa: bool, propietario: str | None = None) -> None:
+    _ejecutar(
+        "UPDATE ahorros SET activa = :activa WHERE id = :id AND propietario = :prop",
+        {"activa": int(activa), "id": id_, "prop": _prop(propietario)},
+    )
 
 
-def eliminar_ahorro(id_: int) -> None:
-    _ejecutar("DELETE FROM ahorros WHERE id = :id", {"id": id_})
+def eliminar_ahorro(id_: int, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM ahorros WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
+    )
 
 
 # ---------------------------------------------------------- Movimientos puntuales ----
@@ -544,77 +642,90 @@ def eliminar_ahorro(id_: int) -> None:
 
 def anadir_movimiento(
     cuenta_id: int | None, fecha: dt.date, concepto: str, importe: float, categoria: str,
+    propietario: str | None = None,
 ) -> None:
     init_db()
     _ejecutar(
-        """INSERT INTO movimientos (cuenta_id, fecha, concepto, importe, categoria)
-           VALUES (:cuenta_id, :fecha, :concepto, :importe, :categoria)""",
+        """INSERT INTO movimientos (cuenta_id, fecha, concepto, importe, categoria, propietario)
+           VALUES (:cuenta_id, :fecha, :concepto, :importe, :categoria, :prop)""",
         {
             "cuenta_id": cuenta_id, "fecha": fecha.isoformat(), "concepto": concepto,
-            "importe": importe, "categoria": categoria,
+            "importe": importe, "categoria": categoria, "prop": _prop(propietario),
         },
     )
 
 
-def cargar_movimientos() -> pd.DataFrame:
+def cargar_movimientos(propietario: str | None = None) -> pd.DataFrame:
     init_db()
     df = _leer(
         """
         SELECT movimientos.*, cuentas.nombre AS cuenta
         FROM movimientos LEFT JOIN cuentas ON cuentas.id = movimientos.cuenta_id
+        WHERE movimientos.propietario = :prop
         ORDER BY fecha DESC, movimientos.id DESC
-        """
+        """,
+        {"prop": _prop(propietario)},
     )
     if not df.empty:
         df["fecha"] = pd.to_datetime(df["fecha"])
     return df
 
 
-def eliminar_movimiento(id_: int) -> None:
-    _ejecutar("DELETE FROM movimientos WHERE id = :id", {"id": id_})
+def eliminar_movimiento(id_: int, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM movimientos WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
+    )
 
 
 # ---------------------------------------------------------- Planes a largo plazo ----
 
 def anadir_plan(
     nombre: str, descripcion: str, importe_objetivo: float,
-    fecha_objetivo: dt.date | None, notas: str,
+    fecha_objetivo: dt.date | None, notas: str, propietario: str | None = None,
 ) -> None:
     init_db()
     _ejecutar(
-        """INSERT INTO planes (nombre, descripcion, importe_objetivo, fecha_objetivo, notas)
-           VALUES (:nombre, :descripcion, :importe_objetivo, :fecha_objetivo, :notas)""",
+        """INSERT INTO planes (nombre, descripcion, importe_objetivo, fecha_objetivo, notas, propietario)
+           VALUES (:nombre, :descripcion, :importe_objetivo, :fecha_objetivo, :notas, :prop)""",
         {
             "nombre": nombre, "descripcion": descripcion, "importe_objetivo": importe_objetivo,
-            "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None, "notas": notas,
+            "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None,
+            "notas": notas, "prop": _prop(propietario),
         },
     )
 
 
-def cargar_planes() -> pd.DataFrame:
+def cargar_planes(propietario: str | None = None) -> pd.DataFrame:
     init_db()
-    return _leer("SELECT * FROM planes ORDER BY fecha_objetivo")
+    return _leer(
+        "SELECT * FROM planes WHERE propietario = :prop ORDER BY fecha_objetivo",
+        {"prop": _prop(propietario)},
+    )
 
 
 def actualizar_plan(
     id_: int, nombre: str, descripcion: str, importe_objetivo: float,
-    fecha_objetivo: dt.date | None, notas: str,
+    fecha_objetivo: dt.date | None, notas: str, propietario: str | None = None,
 ) -> None:
     _ejecutar(
         """UPDATE planes SET
                nombre = :nombre, descripcion = :descripcion, importe_objetivo = :importe_objetivo,
                fecha_objetivo = :fecha_objetivo, notas = :notas
-           WHERE id = :id""",
+           WHERE id = :id AND propietario = :prop""",
         {
             "nombre": nombre, "descripcion": descripcion, "importe_objetivo": importe_objetivo,
             "fecha_objetivo": fecha_objetivo.isoformat() if fecha_objetivo else None,
-            "notas": notas, "id": id_,
+            "notas": notas, "id": id_, "prop": _prop(propietario),
         },
     )
 
 
-def eliminar_plan(id_: int) -> None:
-    _ejecutar("DELETE FROM planes WHERE id = :id", {"id": id_})
+def eliminar_plan(id_: int, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM planes WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
+    )
 
 
 # -------------------------------------------- Valores mensuales (variable) ----
@@ -622,20 +733,25 @@ def eliminar_plan(id_: int) -> None:
 # "variable". Si no hay valor para un mes (normalmente futuro), la proyección
 # usa la media de los últimos registrados como estimación.
 
-def registrar_valor_mensual(tipo_padre: str, padre_id: int, periodo: str, importe: float) -> None:
+def registrar_valor_mensual(
+    tipo_padre: str, padre_id: int, periodo: str, importe: float, propietario: str | None = None,
+) -> None:
     init_db()
     _ejecutar(
-        """INSERT INTO valores_mensuales (tipo_padre, padre_id, periodo, importe)
-           VALUES (:tipo_padre, :padre_id, :periodo, :importe)
+        """INSERT INTO valores_mensuales (tipo_padre, padre_id, periodo, importe, propietario)
+           VALUES (:tipo_padre, :padre_id, :periodo, :importe, :prop)
            ON CONFLICT (tipo_padre, padre_id, periodo) DO UPDATE SET importe = excluded.importe""",
-        {"tipo_padre": tipo_padre, "padre_id": padre_id, "periodo": periodo, "importe": importe},
+        {"tipo_padre": tipo_padre, "padre_id": padre_id, "periodo": periodo,
+         "importe": importe, "prop": _prop(propietario)},
     )
 
 
-def cargar_valores_mensuales(tipo_padre: str | None = None, padre_id: int | None = None) -> pd.DataFrame:
+def cargar_valores_mensuales(
+    tipo_padre: str | None = None, padre_id: int | None = None, propietario: str | None = None,
+) -> pd.DataFrame:
     init_db()
-    query = "SELECT * FROM valores_mensuales WHERE 1=1"
-    params: dict = {}
+    query = "SELECT * FROM valores_mensuales WHERE propietario = :prop"
+    params: dict = {"prop": _prop(propietario)}
     if tipo_padre:
         query += " AND tipo_padre = :tipo_padre"
         params["tipo_padre"] = tipo_padre
@@ -646,28 +762,51 @@ def cargar_valores_mensuales(tipo_padre: str | None = None, padre_id: int | None
     return _leer(query, params)
 
 
-def eliminar_valor_mensual(id_: int) -> None:
-    _ejecutar("DELETE FROM valores_mensuales WHERE id = :id", {"id": id_})
-
-
-# ---------------------------------------------------------------- Categorías ----
-
-def anadir_categoria(nombre: str) -> None:
-    init_db()
+def eliminar_valor_mensual(id_: int, propietario: str | None = None) -> None:
     _ejecutar(
-        "INSERT INTO categorias (nombre) VALUES (:nombre) ON CONFLICT (nombre) DO NOTHING",
-        {"nombre": nombre},
+        "DELETE FROM valores_mensuales WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
     )
 
 
-def cargar_categorias() -> list[str]:
+# ---------------------------------------------------------------- Categorías ----
+# Cada usuario tiene su propia lista. La primera vez se siembran las de defecto.
+
+def anadir_categoria(nombre: str, propietario: str | None = None) -> None:
     init_db()
-    df = _leer("SELECT nombre FROM categorias ORDER BY nombre")
+    prop = _prop(propietario)
+    existentes = {c.lower() for c in cargar_categorias(prop)}
+    if nombre.strip().lower() not in existentes:
+        _ejecutar(
+            "INSERT INTO categorias (nombre, propietario) VALUES (:nombre, :prop)",
+            {"nombre": nombre.strip(), "prop": prop},
+        )
+
+
+def cargar_categorias(propietario: str | None = None) -> list[str]:
+    init_db()
+    prop = _prop(propietario)
+    df = _leer(
+        "SELECT nombre FROM categorias WHERE propietario = :prop ORDER BY nombre",
+        {"prop": prop},
+    )
+    if df.empty:
+        _ejecutar(
+            "INSERT INTO categorias (nombre, propietario) VALUES (:nombre, :prop)",
+            [{"nombre": n, "prop": prop} for n in CATEGORIAS_DEFECTO],
+        )
+        df = _leer(
+            "SELECT nombre FROM categorias WHERE propietario = :prop ORDER BY nombre",
+            {"prop": prop},
+        )
     return df["nombre"].tolist() if not df.empty else []
 
 
-def eliminar_categoria(nombre: str) -> None:
-    _ejecutar("DELETE FROM categorias WHERE nombre = :nombre", {"nombre": nombre})
+def eliminar_categoria(nombre: str, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM categorias WHERE nombre = :nombre AND propietario = :prop",
+        {"nombre": nombre, "prop": _prop(propietario)},
+    )
 
 
 # ---------------------------------------------------------------- Logos ----
@@ -675,13 +814,17 @@ def eliminar_categoria(nombre: str) -> None:
 TABLAS_CON_LOGO = ("cuentas", "conceptos", "deudas", "ahorros")
 
 
-def actualizar_logo(tabla: str, id_: int, ruta: str | None) -> None:
+def actualizar_logo(tabla: str, id_: int, ruta: str | None, propietario: str | None = None) -> None:
     if tabla not in TABLAS_CON_LOGO:
         raise ValueError(f"Tabla sin columna logo: {tabla}")
-    _ejecutar(f"UPDATE {tabla} SET logo = :ruta WHERE id = :id", {"ruta": ruta, "id": id_})
+    _ejecutar(
+        f"UPDATE {tabla} SET logo = :ruta WHERE id = :id AND propietario = :prop",
+        {"ruta": ruta, "id": id_, "prop": _prop(propietario)},
+    )
 
 
 # ---------------------------------------------------------- Usuarios / accesos ----
+# Tablas globales (no llevan propietario): gestión de cuentas de acceso y log.
 
 def obtener_usuario(email: str) -> dict | None:
     init_db()
