@@ -36,7 +36,7 @@ MODO_LABELS = {
 
 with st.sidebar:
     st.markdown(
-        estilo.marca_sidebar("assets/logo.webp", usuario.get("nombre") or usuario["email"]),
+        estilo.marca_sidebar("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
         unsafe_allow_html=True,
     )
     opciones = ["Inicio", "Cuentas"]
@@ -210,8 +210,6 @@ if pagina == "Inicio":
         ahorro_total = ahorros["actual"].sum() if not ahorros.empty else 0.0
         patrimonio_neto = ahorro_total - deuda_pendiente
 
-        st.caption(f"Resumen de {MESES_NOMBRE[mes_actual.month - 1]} {mes_actual.year}")
-
         resumen_spark = proyeccion.tabla_resumen_mensual(detalle)
         s_ing = resumen_spark["ingresos"].tolist() if not resumen_spark.empty else []
         s_gas = resumen_spark["gastos"].tolist() if not resumen_spark.empty else []
@@ -223,14 +221,34 @@ if pagina == "Inicio":
             [ahorro_total * (0.6 + 0.4 * i / (n - 1)) for i in range(n)] if n > 1 else [ahorro_total, ahorro_total]
         )
 
-        tarjetas = [
-            {"icono": "◆", "label": "Patrimonio neto", "valor": f"{patrimonio_neto:,.0f} €", "serie": s_pat or s_bal, "color": estilo.VERDE},
-            {"icono": "↑", "label": "Ingresos", "valor": f"{ingresos_mes:,.0f} €", "serie": s_ing, "color": estilo.VERDE},
-            {"icono": "↓", "label": "Gastos", "valor": f"{gastos_mes:,.0f} €", "serie": s_gas, "color": estilo.ROJO},
-            {"icono": "≈", "label": "Balance", "valor": f"{balance_mes:,.0f} €", "serie": s_bal, "color": estilo.AZUL},
-            {"icono": "▭", "label": "Deuda pendiente", "valor": f"{deuda_pendiente:,.0f} €", "serie": s_deuda, "color": estilo.NARANJA},
-            {"icono": "◎", "label": "Ahorrado", "valor": f"{ahorro_total:,.0f} €", "serie": s_ahorro, "color": estilo.MORADO},
+        tarjetas_todas = [
+            {"key": "patrimonio", "icono": "◆", "label": "Patrimonio neto", "valor": f"{patrimonio_neto:,.0f} €", "serie": s_pat or s_bal, "color": estilo.VERDE},
+            {"key": "ingresos", "icono": "↑", "label": "Ingresos", "valor": f"{ingresos_mes:,.0f} €", "serie": s_ing, "color": estilo.VERDE},
+            {"key": "gastos", "icono": "↓", "label": "Gastos", "valor": f"{gastos_mes:,.0f} €", "serie": s_gas, "color": estilo.ROJO},
+            {"key": "balance", "icono": "≈", "label": "Balance", "valor": f"{balance_mes:,.0f} €", "serie": s_bal, "color": estilo.AZUL},
+            {"key": "deuda", "icono": "▭", "label": "Deuda pendiente", "valor": f"{deuda_pendiente:,.0f} €", "serie": s_deuda, "color": estilo.NARANJA},
+            {"key": "ahorrado", "icono": "◎", "label": "Ahorrado", "valor": f"{ahorro_total:,.0f} €", "serie": s_ahorro, "color": estilo.MORADO},
         ]
+        claves_todas = [t["key"] for t in tarjetas_todas]
+        guardadas = [k for k in db.get_preferencia("kpis_inicio", ",".join(claves_todas)).split(",") if k in claves_todas]
+        if not guardadas:
+            guardadas = claves_todas
+
+        cab1, cab2 = st.columns([5, 1], vertical_alignment="center")
+        cab1.caption(f"Resumen de {MESES_NOMBRE[mes_actual.month - 1]} {mes_actual.year}")
+        with cab2.popover("⚙️ Personalizar", use_container_width=True):
+            with st.form("form_kpis", border=False):
+                st.markdown("**KPIs a mostrar en Inicio**")
+                marcados = {
+                    t["key"]: st.checkbox(t["label"], value=(t["key"] in guardadas), key=f"kpi_{t['key']}")
+                    for t in tarjetas_todas
+                }
+                if st.form_submit_button("Aplicar", type="primary", use_container_width=True):
+                    nueva = [k for k, v in marcados.items() if v] or [claves_todas[0]]
+                    db.set_preferencia("kpis_inicio", ",".join(nueva))
+                    st.rerun()
+
+        tarjetas = [t for t in tarjetas_todas if t["key"] in guardadas]
         st.markdown(estilo.tarjetas_stats(tarjetas), unsafe_allow_html=True)
 
         tab_resumen, tab_mes, tab_graficos, tab_deudas = st.tabs(["Resumen", "Por mes", "Gráficos", "Deudas activas"])

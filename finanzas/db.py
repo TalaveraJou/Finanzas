@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL
+from sqlalchemy.pool import NullPool
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finanzas.db"
 
@@ -76,10 +77,16 @@ def _get_engine() -> Engine:
     if url is not None:
         drivername = url.drivername if isinstance(url, URL) else str(url)
         es_pg = drivername.startswith("postgres")
-        # Supabase (pooler) exige SSL. pool_pre_ping evita conexiones muertas
-        # cuando la app de Streamlit lleva un rato dormida.
-        connect_args = {"sslmode": "require"} if es_pg else {}
-        return create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
+        if es_pg:
+            # Supabase usa un pooler (Supavisor/pgbouncer) que ya agrupa las
+            # conexiones. Agrupar también en el cliente provoca errores
+            # intermitentes (p. ej. InvalidSchemaName) cuando una conexión
+            # reutilizada cae en otro backend. Con NullPool abrimos una conexión
+            # por operación y la cerramos; además exigimos SSL y fijamos el
+            # esquema `public` para evitar problemas de resolución de nombres.
+            connect_args = {"sslmode": "require", "options": "-c search_path=public"}
+            return create_engine(url, poolclass=NullPool, connect_args=connect_args)
+        return create_engine(url, pool_pre_ping=True, pool_recycle=300)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{DB_PATH}")
 
@@ -272,6 +279,17 @@ def init_db() -> None:
                 id {pk},
                 nombre TEXT NOT NULL,
                 propietario TEXT
+            )
+            """
+        ))
+        conn.execute(text(
+            f"""
+            CREATE TABLE IF NOT EXISTS preferencias (
+                id {pk},
+                propietario TEXT NOT NULL,
+                clave TEXT NOT NULL,
+                valor TEXT,
+                UNIQUE (propietario, clave)
             )
             """
         ))
@@ -888,3 +906,27 @@ def registrar_acceso(email: str, evento: str, detalle: str = "") -> None:
 def cargar_accesos(limite: int = 200) -> pd.DataFrame:
     init_db()
     return _leer("SELECT * FROM accesos ORDER BY ts DESC LIMIT :lim", {"lim": limite})
+
+
+# ---------------------------------------------------------- Preferencias ----
+# Ajustes por usuario (p. ej. qué KPIs mostrar en Inicio).
+
+def get_preferencia(clave: str, default: str = "", propietario: str | None = None) -> str:
+    init_db()
+    df = _leer(
+        "SELECT valor FROM preferencias WHERE propietario = :p AND clave = :c",
+        {"p": _prop(propietario), "c": clave},
+    )
+    if df.empty:
+        return default
+    valor = df.iloc[0]["valor"]
+    return default if valor is None else str(valor)
+
+
+def set_preferencia(clave: str, valor: str, propietario: str | None = None) -> None:
+    init_db()
+    _ejecutar(
+        "INSERT INTO preferencias (propietario, clave, valor) VALUES (:p, :c, :v) "
+        "ON CONFLICT (propietario, clave) DO UPDATE SET valor = excluded.valor",
+        {"p": _prop(propietario), "c": clave, "v": valor},
+    )

@@ -39,7 +39,7 @@ span.material-symbols-outlined {{
 
 [data-testid="stAppViewContainer"] {{ background: {BG}; }}
 [data-testid="stHeader"] {{ background: transparent; }}
-.block-container {{ padding-top: 2rem !important; padding-bottom: 3rem; max-width: 1180px !important; }}
+.block-container {{ padding-top: 2rem !important; padding-bottom: 3rem; max-width: 100% !important; padding-left: 2.2rem !important; padding-right: 2.2rem !important; }}
 
 h1, h2, h3 {{ letter-spacing: -.02em; font-weight: 700; color: {TEXT}; }}
 h1 {{ font-weight: 800; }}
@@ -57,6 +57,7 @@ h1 {{ font-weight: 800; }}
 .profile-role {{ color:{MUTED}; font-size:.75rem; overflow:hidden; text-overflow:ellipsis; max-width:150px; white-space:nowrap; }}
 .brand {{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:11px; padding:4px 4px 18px; }}
 .brand-logo {{ width:84px; height:84px; border-radius:22px; object-fit:cover; box-shadow:0 8px 22px rgba(0,0,0,.5); }}
+.brand-logo-svg svg {{ width:150px; max-width:80%; height:auto; display:block; }}
 .brand-welcome {{ font-weight:700; font-size:1.05rem; color:{TEXT}; letter-spacing:-.01em; }}
 
 /* ---- Hero de patrimonio ---- */
@@ -295,12 +296,15 @@ def login_header(logo_path: str) -> str:
     )
 
 
-def marca_sidebar(logo_path: str, nombre: str = "") -> str:
+def marca_sidebar(logo_path: str = "assets/logo-login.svg", nombre: str = "") -> str:
     p = Path(logo_path)
     img = ""
     if p.exists():
-        datos = base64.b64encode(p.read_bytes()).decode()
-        img = f'<img src="data:image/webp;base64,{datos}" class="brand-logo">'
+        if p.suffix == ".svg":
+            img = f'<div class="brand-logo-svg">{p.read_text(encoding="utf-8")}</div>'
+        else:
+            datos = base64.b64encode(p.read_bytes()).decode()
+            img = f'<img src="data:image/webp;base64,{datos}" class="brand-logo">'
     bienvenida = f'<div class="brand-welcome">Bienvenido, {nombre}</div>' if nombre else ""
     return f'<div class="brand">{img}{bienvenida}</div>'
 
