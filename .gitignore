@@ -1,0 +1,6 @@
+# Datos personales: nunca al repositorio
+data/*.db
+data/raw/
+*.csv
+.venv/
+__pycache__/
