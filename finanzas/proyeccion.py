@@ -24,6 +24,18 @@ def _parse_meses_aplicables(valor) -> set[int] | None:
     return {int(m) for m in str(valor).split(",") if m.strip()}
 
 
+def _parse_importes_meses(valor) -> dict[int, float]:
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)) or valor == "":
+        return {}
+    resultado = {}
+    for par in str(valor).split(","):
+        if ":" not in par:
+            continue
+        mes, importe = par.split(":")
+        resultado[int(mes)] = float(importe)
+    return resultado
+
+
 def _vigente_en(fecha_inicio: str, meses_limite, activo: bool, periodo: pd.Period, meses_aplicables=None) -> bool:
     if not activo:
         return False
@@ -123,11 +135,14 @@ def detalle_mensual(
     if not conceptos_normales.empty:
         for _, row in conceptos_normales.iterrows():
             signo = 1 if row.tipo == "ingreso" else -1
+            importes_mes_map = _parse_importes_meses(getattr(row, "importes_meses", None))
             for periodo in periodos:
                 if not _vigente_en(row.fecha_inicio, row.meses_duracion, row.activo, periodo, row.meses_aplicables):
                     continue
                 if row.modo == "variable":
                     importe = signo * _importe_variable(valores, "concepto", row.id, periodo, row.importe)
+                elif periodo.month in importes_mes_map:
+                    importe = signo * importes_mes_map[periodo.month]
                 else:
                     importe = signo * row.importe
                 filas.append({

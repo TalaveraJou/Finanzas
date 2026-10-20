@@ -40,6 +40,7 @@ def init_db() -> None:
                 fecha_inicio TEXT NOT NULL,
                 meses_duracion INTEGER,
                 meses_aplicables TEXT,
+                importes_meses TEXT,
                 activo INTEGER NOT NULL DEFAULT 1
             )
             """
@@ -47,6 +48,8 @@ def init_db() -> None:
         columnas_conceptos = {r[1] for r in conn.execute("PRAGMA table_info(conceptos)")}
         if "meses_aplicables" not in columnas_conceptos:
             conn.execute("ALTER TABLE conceptos ADD COLUMN meses_aplicables TEXT")
+        if "importes_meses" not in columnas_conceptos:
+            conn.execute("ALTER TABLE conceptos ADD COLUMN importes_meses TEXT")
 
         definicion = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='conceptos'"
@@ -217,19 +220,28 @@ def eliminar_cuenta(id_: int) -> None:
 # futuro). meses_aplicables restringe en qué meses del año se aplica (p.ej.
 # un seguro que se paga en enero, mayo y septiembre); NULL = todos los meses.
 
+def _serializar_importes_meses(importes_meses: dict[int, float] | None) -> str | None:
+    if not importes_meses:
+        return None
+    return ",".join(f"{mes}:{importe}" for mes, importe in sorted(importes_meses.items()))
+
+
 def anadir_concepto(
     cuenta_id: int, nombre: str, tipo: str, modo: str, grupo: str, importe: float,
     fecha_inicio: dt.date, meses_duracion: int | None, meses_aplicables: list[int] | None = None,
+    importes_meses: dict[int, float] | None = None,
 ) -> None:
     init_db()
     meses_txt = ",".join(str(m) for m in sorted(meses_aplicables)) if meses_aplicables else None
+    importes_meses_txt = _serializar_importes_meses(importes_meses)
     with _conectar() as conn:
         conn.execute(
             """INSERT INTO conceptos
-               (cuenta_id, nombre, tipo, modo, grupo, importe, fecha_inicio, meses_duracion, meses_aplicables, activo)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+               (cuenta_id, nombre, tipo, modo, grupo, importe, fecha_inicio, meses_duracion,
+                meses_aplicables, importes_meses, activo)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
             (cuenta_id, nombre, tipo, modo, grupo, importe, fecha_inicio.isoformat(),
-             meses_duracion, meses_txt),
+             meses_duracion, meses_txt, importes_meses_txt),
         )
 
 
@@ -257,16 +269,18 @@ def actualizar_concepto_activo(id_: int, activo: bool) -> None:
 def actualizar_concepto(
     id_: int, cuenta_id: int, nombre: str, tipo: str, modo: str, grupo: str, importe: float,
     fecha_inicio: dt.date, meses_duracion: int | None, meses_aplicables: list[int] | None,
+    importes_meses: dict[int, float] | None = None,
 ) -> None:
     meses_txt = ",".join(str(m) for m in sorted(meses_aplicables)) if meses_aplicables else None
+    importes_meses_txt = _serializar_importes_meses(importes_meses)
     with _conectar() as conn:
         conn.execute(
             """UPDATE conceptos SET
                    cuenta_id = ?, nombre = ?, tipo = ?, modo = ?, grupo = ?, importe = ?,
-                   fecha_inicio = ?, meses_duracion = ?, meses_aplicables = ?
+                   fecha_inicio = ?, meses_duracion = ?, meses_aplicables = ?, importes_meses = ?
                WHERE id = ?""",
             (cuenta_id, nombre, tipo, modo, grupo, importe, fecha_inicio.isoformat(),
-             meses_duracion, meses_txt, id_),
+             meses_duracion, meses_txt, importes_meses_txt, id_),
         )
 
 

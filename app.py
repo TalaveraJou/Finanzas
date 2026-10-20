@@ -124,13 +124,10 @@ def _guardar_logo_redimensionado(archivo, ruta: Path) -> None:
     recorte.save(ruta, format="PNG")
 
 
-def subir_logo(tabla: str, id_: int, logo_actual: str | None, key_prefix: str) -> None:
-    """Muestra el logo actual (si lo hay) y un selector para subir/cambiar uno."""
-    col1, col2 = st.columns([1, 4])
-    if _logo_valido(logo_actual):
-        col1.image(logo_actual, width=48)
-    archivo = col2.file_uploader(
-        "Logo (opcional, se recorta y escala automáticamente a un cuadrado)",
+def subir_logo(tabla: str, id_: int, key_prefix: str) -> None:
+    """Selector para subir/cambiar el logo (la vista previa ya la pone la cabecera de la tarjeta)."""
+    archivo = st.file_uploader(
+        "Cambiar logo (opcional, se recorta y escala automáticamente a un cuadrado)",
         type=["png", "jpg", "jpeg", "webp"], key=f"{key_prefix}_logo",
     )
     if archivo is not None:
@@ -145,20 +142,24 @@ def subir_logo(tabla: str, id_: int, logo_actual: str | None, key_prefix: str) -
             st.rerun()
 
 
-def tarjeta_desplegable(logo_path: str | None, titulo: str, key: str) -> bool:
-    """Cabecera plegable con el logo a la izquierda del título.
-    (st.expander no admite imágenes en la etiqueta, así que montamos la cabecera a mano.)"""
+def tarjeta_desplegable(logo_path: str | None, titulo: str, key: str):
+    """Tarjeta única y plegable con el logo a la izquierda del título.
+    (st.expander no admite imágenes en la etiqueta, así que montamos la cabecera a mano.)
+    Devuelve (abierto, contenedor): escribe el resto del contenido con `with contenedor:`
+    para que la cabecera y el cuerpo queden en la misma tarjeta."""
     abierto_key = f"abierto_{key}"
     abierto = st.session_state.get(abierto_key, False)
-    col_logo, col_boton = st.columns([1, 11], vertical_alignment="center")
-    if _logo_valido(logo_path):
-        col_logo.image(logo_path, width=32)
-    flecha = "▾" if abierto else "▸"
-    if col_boton.button(f"{flecha}  {titulo}", key=f"toggle_{key}", use_container_width=True):
-        abierto = not abierto
-        st.session_state[abierto_key] = abierto
-        st.rerun()
-    return abierto
+    contenedor = st.container(border=True)
+    with contenedor:
+        col_logo, col_boton = st.columns([1, 11], vertical_alignment="center")
+        if _logo_valido(logo_path):
+            col_logo.image(logo_path, width=36)
+        flecha = "⌄" if abierto else "›"
+        if col_boton.button(f"{flecha}  {titulo}", key=f"toggle_{key}", use_container_width=True):
+            abierto = not abierto
+            st.session_state[abierto_key] = abierto
+            st.rerun()
+    return abierto, contenedor
 
 
 # ================================================================= Inicio ====
@@ -204,6 +205,7 @@ if pagina == "Inicio":
         tab_resumen, tab_mes, tab_graficos, tab_deudas = st.tabs(["Resumen", "Por mes", "Gráficos", "Deudas activas"])
 
         with tab_resumen:
+            logos_cuenta = dict(zip(cuentas["nombre"], cuentas.get("logo", pd.Series(dtype=str))))
             col_izq, col_der = st.columns([1.2, 1])
             with col_izq:
                 st.markdown("**Últimos movimientos**")
@@ -212,7 +214,8 @@ if pagina == "Inicio":
                         st.caption("Aún no hay movimientos puntuales.")
                     else:
                         for row in movimientos.head(6).itertuples():
-                            icono = "⬆️" if row.importe > 0 else "⬇️"
+                            logo = logos_cuenta.get(row.cuenta)
+                            icono = logo if (isinstance(logo, str) and logo) else ("⬆️" if row.importe > 0 else "⬇️")
                             sub = f"{row.cuenta or 'sin cuenta'} · {row.fecha.strftime('%d %b')}"
                             st.markdown(
                                 estilo.fila_movimiento(icono, row.concepto, sub, row.importe),
@@ -221,13 +224,17 @@ if pagina == "Inicio":
             with col_der:
                 st.markdown("**Por cuenta este mes**")
                 por_cuenta = proyeccion.tabla_por_cuenta(detalle, mes_actual)
-                if por_cuenta.empty:
-                    st.caption("Añade cuentas, conceptos recurrentes o movimientos para ver el resumen.")
-                else:
-                    st.dataframe(
-                        por_cuenta.style.format({"ingresos": "{:,.2f} €", "gastos": "{:,.2f} €", "balance": "{:,.2f} €"}),
-                        hide_index=True, width="stretch",
-                    )
+                with st.container(border=True):
+                    if por_cuenta.empty:
+                        st.caption("Añade cuentas, conceptos recurrentes o movimientos para ver el resumen.")
+                    else:
+                        for fila in por_cuenta.itertuples():
+                            st.markdown(
+                                estilo.fila_cuenta(
+                                    logos_cuenta.get(fila.cuenta), fila.cuenta, fila.ingresos, fila.gastos, fila.balance,
+                                ),
+                                unsafe_allow_html=True,
+                            )
 
         with tab_mes:
             periodos_mes = proyeccion.meses_entre(mes_actual - 12, mes_actual + 11)
@@ -264,8 +271,10 @@ if pagina == "Inicio":
                         st.caption(f"Total gastos: {gastos_mes_elegido['importe_abs'].sum():,.2f} €")
 
                     ingresos_mes_elegido = detalle_elegido[detalle_elegido["tipo"] == "ingreso"]
-                    if not ingresos_mes_elegido.empty:
-                        st.markdown("**Ingresos de ese mes**")
+                    st.markdown(f"**Ingresos de {nombre_mes_elegido}** ({len(ingresos_mes_elegido)})")
+                    if ingresos_mes_elegido.empty:
+                        st.caption("Sin ingresos registrados para ese mes.")
+                    else:
                         tabla_ingresos = ingresos_mes_elegido[["cuenta", "grupo", "concepto", "importe_abs"]].rename(
                             columns={"importe_abs": "importe"}
                         ).sort_values(["cuenta", "concepto"])
@@ -273,6 +282,24 @@ if pagina == "Inicio":
                             tabla_ingresos.style.format({"importe": "{:,.2f} €"}),
                             hide_index=True, width="stretch",
                         )
+                        st.caption(f"Total ingresos: {ingresos_mes_elegido['importe_abs'].sum():,.2f} €")
+
+                    st.markdown("**Total por cuenta**")
+                    resumen_cuenta = detalle_elegido.copy()
+                    resumen_cuenta["bloque"] = resumen_cuenta["tipo"].apply(
+                        lambda t: "ingresos" if t == "ingreso" else "gastos"
+                    )
+                    tabla_cuenta = (
+                        resumen_cuenta.groupby(["cuenta", "bloque"])["importe_abs"].sum()
+                        .unstack(fill_value=0).reindex(columns=["ingresos", "gastos"], fill_value=0)
+                    )
+                    tabla_cuenta["balance"] = tabla_cuenta["ingresos"] - tabla_cuenta["gastos"]
+                    st.dataframe(
+                        tabla_cuenta.reset_index().style.format(
+                            {"ingresos": "{:,.2f} €", "gastos": "{:,.2f} €", "balance": "{:,.2f} €"}
+                        ),
+                        hide_index=True, width="stretch",
+                    )
 
                     total = detalle_elegido["importe"].sum()
                     st.caption(f"Balance neto de {nombre_mes_elegido}: {total:,.2f} €")
@@ -345,7 +372,7 @@ elif pagina == "Cuentas":
     st.title("Cuentas y Movimientos")
 
     tabs = st.tabs([
-        "Cuentas", "Deudas", "Conceptos recurrentes",
+        "Cuentas", "Deudas", "Ingresos", "Gastos recurrentes",
         "Movimientos puntuales", "Ahorros e inversiones", "Planes", "Proyección",
     ])
 
@@ -369,18 +396,19 @@ elif pagina == "Cuentas":
             st.caption("Aún no tienes cuentas.")
         else:
             for row in cuentas.itertuples():
-                abierto = tarjeta_desplegable(getattr(row, "logo", None), row.nombre, f"cuenta_{row.id}")
+                abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), row.nombre, f"cuenta_{row.id}")
                 if abierto:
-                    subir_logo("cuentas", row.id, getattr(row, "logo", None), f"cuenta_{row.id}")
-                    nuevo_nombre = st.text_input("Nombre", value=row.nombre, key=f"nombre_cuenta_{row.id}")
-                    col1, col2 = st.columns(2)
-                    if col1.button("Guardar", key=f"guardar_cuenta_{row.id}"):
-                        if nuevo_nombre.strip() and nuevo_nombre != row.nombre:
-                            db.actualizar_cuenta_nombre(row.id, nuevo_nombre.strip())
+                    with contenedor:
+                        subir_logo("cuentas", row.id, f"cuenta_{row.id}")
+                        nuevo_nombre = st.text_input("Nombre", value=row.nombre, key=f"nombre_cuenta_{row.id}")
+                        col1, col2 = st.columns(2)
+                        if col1.button("Guardar", key=f"guardar_cuenta_{row.id}"):
+                            if nuevo_nombre.strip() and nuevo_nombre != row.nombre:
+                                db.actualizar_cuenta_nombre(row.id, nuevo_nombre.strip())
+                                st.rerun()
+                        if col2.button("Eliminar", key=f"del_cuenta_{row.id}"):
+                            db.eliminar_cuenta(row.id)
                             st.rerun()
-                    if col2.button("Eliminar", key=f"del_cuenta_{row.id}"):
-                        db.eliminar_cuenta(row.id)
-                        st.rerun()
 
     # -------------------------------------------------------------- Deudas --
     with tabs[1]:
@@ -424,120 +452,164 @@ elif pagina == "Cuentas":
                 info = proyeccion.info_deuda(row, valores)
                 restantes_txt = info["meses_restantes"] if info["meses_restantes"] is not None else "?"
                 titulo = f"{row.nombre} · {row.cuenta or 'sin cuenta'} · pendiente {row.importe_pendiente:,.0f} € · quedan {restantes_txt} meses"
-                abierto = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"deuda_{row.id}")
+                abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"deuda_{row.id}")
                 if abierto:
-                    subir_logo("deudas", row.id, getattr(row, "logo", None), f"deuda_{row.id}")
-                    progreso = 1 - (row.importe_pendiente / row.importe_total) if row.importe_total else 0
-                    st.progress(min(max(progreso, 0.0), 1.0))
-                    fin = info["fecha_fin_estimada"]
-                    fin_txt = f"{MESES_NOMBRE[fin.month - 1]} {fin.year}" if fin is not None else "sin estimar"
-                    st.caption(
-                        f"Cuota estimada: {info['cuota_estimada']:,.2f} € · fin estimado: {fin_txt}"
-                    )
+                    with contenedor:
+                        subir_logo("deudas", row.id, f"deuda_{row.id}")
+                        progreso = 1 - (row.importe_pendiente / row.importe_total) if row.importe_total else 0
+                        st.progress(min(max(progreso, 0.0), 1.0))
+                        fin = info["fecha_fin_estimada"]
+                        fin_txt = f"{MESES_NOMBRE[fin.month - 1]} {fin.year}" if fin is not None else "sin estimar"
+                        st.caption(
+                            f"Cuota estimada: {info['cuota_estimada']:,.2f} € · fin estimado: {fin_txt}"
+                        )
 
-                    if row.tipo_pago == "variable":
-                        registrar_variable("deuda", row.id, f"deuda_{row.id}", "Cuota pagada ese mes (€)")
+                        if row.tipo_pago == "variable":
+                            registrar_variable("deuda", row.id, f"deuda_{row.id}", "Cuota pagada ese mes (€)")
 
-                    with st.form(f"editar_deuda_{row.id}"):
-                        st.markdown("**Editar datos de la deuda**")
-                        e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_{row.id}")
-                        opciones_cuenta = list(cuentas["nombre"]) if not cuentas.empty else []
-                        indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
-                        e_cuenta = st.selectbox(
-                            "Cuenta", opciones_cuenta, index=indice_cuenta if opciones_cuenta else None,
-                            key=f"e_cuenta_{row.id}",
-                        )
-                        c1, c2 = st.columns(2)
-                        e_total = c1.number_input(
-                            "Importe total (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.importe_total), key=f"e_total_{row.id}",
-                        )
-                        e_pendiente = c2.number_input(
-                            "Importe pendiente (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.importe_pendiente), key=f"e_pendiente_{row.id}",
-                        )
-                        e_tipo_pago = st.radio(
-                            "Tipo de pago", ["fijo", "variable"], horizontal=True,
-                            index=0 if row.tipo_pago == "fijo" else 1, key=f"e_tipopago_{row.id}",
-                        )
-                        e_cuota = st.number_input(
-                            "Cuota mensual (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.cuota_mensual) if pd.notna(row.cuota_mensual) else 0.0,
-                            key=f"e_cuota_{row.id}",
-                            help="El nº de cuotas restantes se calcula solo dividiendo el pendiente entre la cuota.",
-                        )
-                        e_fecha_inicio = st.date_input(
-                            "Fecha de inicio", value=pd.Timestamp(row.fecha_inicio).date(),
-                            key=f"e_fecha_{row.id}",
-                        )
-                        if st.form_submit_button("Guardar cambios"):
-                            cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta else None
-                            db.actualizar_deuda(
-                                row.id, cuenta_id, e_nombre.strip(), e_total, e_pendiente,
-                                e_tipo_pago, e_cuota, None, e_fecha_inicio,
+                        with st.form(f"editar_deuda_{row.id}"):
+                            st.markdown("**Editar datos de la deuda**")
+                            e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_{row.id}")
+                            opciones_cuenta = list(cuentas["nombre"]) if not cuentas.empty else []
+                            indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
+                            e_cuenta = st.selectbox(
+                                "Cuenta", opciones_cuenta, index=indice_cuenta if opciones_cuenta else None,
+                                key=f"e_cuenta_{row.id}",
                             )
-                            st.success("Guardado")
+                            c1, c2 = st.columns(2)
+                            e_total = c1.number_input(
+                                "Importe total (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.importe_total), key=f"e_total_{row.id}",
+                            )
+                            e_pendiente = c2.number_input(
+                                "Importe pendiente (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.importe_pendiente), key=f"e_pendiente_{row.id}",
+                            )
+                            e_tipo_pago = st.radio(
+                                "Tipo de pago", ["fijo", "variable"], horizontal=True,
+                                index=0 if row.tipo_pago == "fijo" else 1, key=f"e_tipopago_{row.id}",
+                            )
+                            e_cuota = st.number_input(
+                                "Cuota mensual (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.cuota_mensual) if pd.notna(row.cuota_mensual) else 0.0,
+                                key=f"e_cuota_{row.id}",
+                                help="El nº de cuotas restantes se calcula solo dividiendo el pendiente entre la cuota.",
+                            )
+                            e_fecha_inicio = st.date_input(
+                                "Fecha de inicio", value=pd.Timestamp(row.fecha_inicio).date(),
+                                key=f"e_fecha_{row.id}",
+                            )
+                            if st.form_submit_button("Guardar cambios"):
+                                cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta else None
+                                db.actualizar_deuda(
+                                    row.id, cuenta_id, e_nombre.strip(), e_total, e_pendiente,
+                                    e_tipo_pago, e_cuota, None, e_fecha_inicio,
+                                )
+                                st.success("Guardado")
+                                st.rerun()
+
+                        c5, c6 = st.columns([1, 1], vertical_alignment="bottom")
+                        activa = c5.checkbox("Activa", value=bool(row.activa), key=f"activa_deuda_{row.id}")
+                        if activa != bool(row.activa):
+                            db.actualizar_deuda_activa(row.id, activa)
+                            st.rerun()
+                        if c6.button("Eliminar deuda", key=f"del_deuda_{row.id}"):
+                            db.eliminar_deuda(row.id)
                             st.rerun()
 
-                    c5, c6 = st.columns([1, 1], vertical_alignment="bottom")
-                    activa = c5.checkbox("Activa", value=bool(row.activa), key=f"activa_deuda_{row.id}")
-                    if activa != bool(row.activa):
-                        db.actualizar_deuda_activa(row.id, activa)
-                        st.rerun()
-                    if c6.button("Eliminar deuda", key=f"del_deuda_{row.id}"):
-                        db.eliminar_deuda(row.id)
-                        st.rerun()
+    # --------------------------------------------------- Ingresos / Gastos --
+    PLANTILLAS_CONCEPTO = {
+        "Nómina (variable, media de los últimos 5 meses)": {
+            "modo": "variable", "tipo": "ingreso", "nombre": "Nómina", "grupo": "Nómina", "meses": [],
+        },
+        "Paga extra (en meses concretos)": {
+            "modo": "fijo", "tipo": "ingreso", "nombre": "Paga extra", "grupo": "Nómina",
+            "meses": ["Junio", "Diciembre"],
+        },
+        "Gasto fraccionado (varios meses del año)": {
+            "modo": "variable", "tipo": "gasto", "nombre": "", "grupo": "",
+            "meses": ["Marzo", "Abril", "Diciembre"],
+        },
+    }
 
-    # --------------------------------------------------- Conceptos recurrentes --
-    with tabs[2]:
+
+    def obtener_nombres_meses(valor):
+        import pandas as pd
+        if pd.isna(valor):
+            return []
+        if isinstance(valor, (int, float)):
+            if not float(valor).is_integer():
+                return []
+            meses = [str(int(valor))]
+        else:
+            meses = str(valor).split(",")
+        nombres = []
+        for mes in meses:
+            try:
+                numero = int(mes.strip())
+                if 1 <= numero <= 12:
+                    nombres.append(MESES_NOMBRE[numero - 1])
+            except (ValueError, TypeError):
+                continue
+        return nombres
+
+    def seccion_conceptos(tipo_fijo, key_ns):
         cuentas = db.cargar_cuentas()
-        with st.expander("➕ Añadir concepto recurrente", expanded=False):
-            PLANTILLAS = {
-                "Nómina (variable, media de los últimos 5 meses)": {
-                    "modo": "variable", "tipo": "ingreso", "nombre": "Nómina", "grupo": "Nómina", "meses": [],
-                },
-                "Paga extra (en meses concretos)": {
-                    "modo": "fijo", "tipo": "ingreso", "nombre": "Paga extra", "grupo": "Nómina",
-                    "meses": ["Junio", "Diciembre"],
-                },
-                "Gasto fraccionado (varios meses del año)": {
-                    "modo": "variable", "tipo": "gasto", "nombre": "", "grupo": "",
-                    "meses": ["Marzo", "Abril", "Diciembre"],
-                },
-            }
+        etiqueta = "ingreso" if tipo_fijo == "ingreso" else "gasto"
+        modos_disponibles = ["fijo", "variable"] if tipo_fijo == "ingreso" else list(MODO_LABELS.keys())
+        plantillas_disponibles = {
+            nombre: datos for nombre, datos in PLANTILLAS_CONCEPTO.items() if datos["tipo"] == tipo_fijo
+        }
+
+        with st.expander(f"➕ Añadir {etiqueta} recurrente"):
             plantilla = st.selectbox(
-                "Plantilla rápida (opcional)", ["Personalizado"] + list(PLANTILLAS.keys()),
-                key="concepto_plantilla",
+                "Plantilla rápida (opcional)", ["Personalizado"] + list(plantillas_disponibles.keys()),
+                key=f"{key_ns}_plantilla",
             )
-            if plantilla != "Personalizado" and st.session_state.get("_plantilla_aplicada") != plantilla:
-                datos = PLANTILLAS[plantilla]
-                st.session_state["concepto_modo_nuevo"] = datos["modo"]
-                st.session_state["tipo_concepto_nuevo"] = datos["tipo"]
-                st.session_state["nombre_concepto_nuevo"] = datos["nombre"]
+            if plantilla != "Personalizado" and st.session_state.get(f"{key_ns}_plantilla_aplicada") != plantilla:
+                datos = plantillas_disponibles[plantilla]
+                st.session_state[f"{key_ns}_modo_nuevo"] = datos["modo"]
+                st.session_state[f"{key_ns}_nombre_nuevo"] = datos["nombre"]
                 if datos["grupo"]:
-                    st.session_state["concepto_nuevo_cat"] = datos["grupo"]
-                st.session_state["meses_aplicables_nuevo"] = datos["meses"]
-                st.session_state["_plantilla_aplicada"] = plantilla
+                    st.session_state[f"{key_ns}_cat"] = datos["grupo"]
+                st.session_state[f"{key_ns}_meses_nuevo"] = datos["meses"]
+                st.session_state[f"{key_ns}_plantilla_aplicada"] = plantilla
                 st.rerun()
             if plantilla == "Personalizado":
-                st.session_state["_plantilla_aplicada"] = "Personalizado"
+                st.session_state[f"{key_ns}_plantilla_aplicada"] = "Personalizado"
 
             modo = st.selectbox(
-                "Cómo se calcula el importe", options=list(MODO_LABELS.keys()),
-                format_func=lambda k: MODO_LABELS[k], key="concepto_modo_nuevo",
+                "Cómo se calcula el importe", options=modos_disponibles,
+                format_func=lambda k: MODO_LABELS[k], key=f"{key_ns}_modo_nuevo",
             )
             especial = modo in ("porcentaje_ingreso", "remanente")
-            grupo = selector_categoria("concepto_nuevo")
-            with st.form("nuevo_concepto", clear_on_submit=True):
-                cuenta_id = selector_cuenta(cuentas, "concepto_cuenta")
+            grupo = selector_categoria(f"{key_ns}_nuevo")
+
+            meses_aplicables = st.multiselect(
+                "Meses concretos del año en que se aplica (vacío = todos los meses)",
+                options=MESES_NOMBRE, key=f"{key_ns}_meses_nuevo",
+                help="Útil para algo que no es mensual, como un seguro que se paga 3 veces al año, "
+                     "o una paga extra en junio y diciembre.",
+            )
+            importes_meses_nuevo = {}
+            if meses_aplicables and modo == "fijo":
+                st.caption("Importe de cada mes seleccionado (pueden ser distintos entre sí):")
+                cols_meses = st.columns(len(meses_aplicables))
+                for i, nombre_mes in enumerate(meses_aplicables):
+                    num_mes = MESES_NOMBRE.index(nombre_mes) + 1
+                    importes_meses_nuevo[num_mes] = cols_meses[i].number_input(
+                        nombre_mes, min_value=0.0, step=0.01, format="%.2f",
+                        key=f"{key_ns}_importe_mes_{num_mes}",
+                    )
+
+            with st.form(f"nuevo_{key_ns}", clear_on_submit=True):
+                cuenta_id = selector_cuenta(cuentas, f"{key_ns}_cuenta")
                 nombre = st.text_input(
-                    "Nombre (ej. Nómina, Gimnasio, Ahorro automático)", key="nombre_concepto_nuevo",
+                    "Nombre (ej. Nómina, Gimnasio, Ahorro automático)", key=f"{key_ns}_nombre_nuevo",
                 )
+                tipo = "gasto" if especial else tipo_fijo
                 if especial:
-                    tipo = "gasto"
                     st.caption("Se contabiliza como salida (gasto) de ese mes.")
-                else:
-                    tipo = st.radio("Tipo", ["ingreso", "gasto"], horizontal=True, key="tipo_concepto_nuevo")
                 col3, col4 = st.columns(2)
                 if modo == "porcentaje_ingreso":
                     importe = col3.number_input(
@@ -545,24 +617,24 @@ elif pagina == "Cuentas":
                         step=0.5, format="%.1f",
                     )
                 elif modo == "remanente":
-                    col3.caption("Se calcula solo: ingresos − gastos − cuotas de deuda − aportaciones de ahorro de ese mes.")
+                    col3.caption("Se calcula solo: ingresos menos gastos menos cuotas de deuda menos aportaciones de ahorro de ese mes.")
                     importe = 0.0
                 elif modo == "variable":
                     importe = col3.number_input(
                         "Estimación inicial (€)", min_value=0.0, step=0.01, format="%.2f",
                         help="Se usa hasta que registres el primer mes real.",
                     )
+                elif importes_meses_nuevo:
+                    importe = col3.number_input(
+                        "Importe el resto de meses (€)", min_value=0.0, step=0.01, format="%.2f",
+                        help="Para los meses marcados arriba se usa el importe que has puesto en cada uno.",
+                    )
                 else:
                     importe = col3.number_input("Importe mensual (€)", min_value=0.0, step=0.01, format="%.2f")
-                fecha_inicio = col4.date_input("Fecha de inicio", dt.date.today(), key="concepto_fecha")
+                fecha_inicio = col4.date_input("Fecha de inicio", dt.date.today(), key=f"{key_ns}_fecha")
                 meses_duracion = st.number_input(
                     "Duración en meses (opcional, 0 = indefinido)", min_value=0, step=1,
-                )
-                meses_aplicables = st.multiselect(
-                    "Meses concretos del año en que se aplica (vacío = todos los meses)",
-                    options=MESES_NOMBRE, key="meses_aplicables_nuevo",
-                    help="Útil para gastos que no son mensuales, como un seguro que se paga 3 veces al año, "
-                         "o una paga extra en junio y diciembre.",
+                    key=f"{key_ns}_duracion_nuevo",
                 )
                 if st.form_submit_button("Guardar"):
                     if cuenta_id is None:
@@ -571,20 +643,24 @@ elif pagina == "Cuentas":
                         st.warning("Pon un nombre.")
                     else:
                         meses_num = [MESES_NOMBRE.index(m) + 1 for m in meses_aplicables] or None
+                        importes_map = importes_meses_nuevo if importes_meses_nuevo else None
                         db.anadir_concepto(
                             cuenta_id, nombre.strip(), tipo, modo, grupo, importe,
-                            fecha_inicio, meses_duracion or None, meses_num,
+                            fecha_inicio, meses_duracion or None, meses_num, importes_map,
                         )
                         st.success("Guardado")
-                        for k in ("nombre_concepto_nuevo", "meses_aplicables_nuevo", "_plantilla_aplicada", "concepto_plantilla"):
+                        for k in (
+                            f"{key_ns}_nombre_nuevo", f"{key_ns}_meses_nuevo",
+                            f"{key_ns}_plantilla_aplicada", f"{key_ns}_plantilla",
+                        ):
                             st.session_state.pop(k, None)
                         st.rerun()
 
         conceptos = db.cargar_conceptos()
+        conceptos = conceptos[conceptos["tipo"] == tipo_fijo] if not conceptos.empty else conceptos
         if conceptos.empty:
-            st.caption("Aún no tienes conceptos recurrentes.")
+            st.caption(f"Aún no tienes {etiqueta}s recurrentes.")
         else:
-            modos = list(MODO_LABELS.keys())
             for row in conceptos.itertuples():
                 icono = "🟢" if row.tipo == "ingreso" else "🟠"
                 if row.modo == "porcentaje_ingreso":
@@ -596,89 +672,110 @@ elif pagina == "Cuentas":
                 else:
                     resumen_importe = f"{row.importe:,.0f} €"
                 titulo = f"{icono} {row.nombre} · {row.cuenta} · {row.grupo or row.tipo} · {resumen_importe}"
-                abierto = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"concepto_{row.id}")
+                abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"{key_ns}_{row.id}")
                 if abierto:
-                    subir_logo("conceptos", row.id, getattr(row, "logo", None), f"concepto_{row.id}")
-                    if row.modo == "variable":
-                        registrar_variable("concepto", row.id, f"concepto_{row.id}")
+                    with contenedor:
+                        subir_logo("conceptos", row.id, f"{key_ns}_{row.id}")
+                        if row.modo == "variable":
+                            registrar_variable("concepto", row.id, f"{key_ns}_{row.id}")
 
-                    e_modo = st.selectbox(
-                        "Cómo se calcula el importe", options=modos, format_func=lambda k: MODO_LABELS[k],
-                        index=modos.index(row.modo) if row.modo in modos else 0,
-                        key=f"e_modo_concepto_{row.id}",
-                    )
-                    e_especial = e_modo in ("porcentaje_ingreso", "remanente")
-                    e_grupo = selector_categoria(f"e_concepto_{row.id}", row.grupo)
-
-                    with st.form(f"editar_concepto_{row.id}"):
-                        opciones_cuenta = list(cuentas["nombre"]) if not cuentas.empty else []
-                        indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
-                        e_cuenta = st.selectbox(
-                            "Cuenta", opciones_cuenta, index=indice_cuenta if opciones_cuenta else None,
-                            key=f"e_cuenta_concepto_{row.id}",
+                        e_modo = st.selectbox(
+                            "Cómo se calcula el importe", options=modos_disponibles,
+                            format_func=lambda k: MODO_LABELS[k],
+                            index=modos_disponibles.index(row.modo) if row.modo in modos_disponibles else 0,
+                            key=f"e_modo_{key_ns}_{row.id}",
                         )
-                        e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_concepto_{row.id}")
-                        if e_especial:
-                            e_tipo = "gasto"
-                            st.caption("Se contabiliza como salida (gasto) de ese mes.")
-                        else:
-                            e_tipo = st.radio(
-                                "Tipo", ["ingreso", "gasto"], horizontal=True,
-                                index=0 if row.tipo == "ingreso" else 1, key=f"e_tipo_concepto_{row.id}",
-                            )
-                        c1, c2 = st.columns(2)
-                        valor_importe = float(row.importe) if pd.notna(row.importe) else 0.0
-                        if e_modo == "porcentaje_ingreso":
-                            e_importe = c1.number_input(
-                                "Porcentaje de los ingresos del mes (%)", min_value=0.0, max_value=100.0,
-                                step=0.5, format="%.1f", value=valor_importe, key=f"e_importe_concepto_{row.id}",
-                            )
-                        elif e_modo == "remanente":
-                            c1.caption("Se calcula solo.")
-                            e_importe = 0.0
-                        else:
-                            e_importe = c1.number_input(
-                                "Importe mensual (€)", min_value=0.0, step=0.01, format="%.2f",
-                                value=valor_importe, key=f"e_importe_concepto_{row.id}",
-                            )
-                        e_fecha_inicio = c2.date_input(
-                            "Fecha de inicio", value=pd.Timestamp(row.fecha_inicio).date(),
-                            key=f"e_fecha_concepto_{row.id}",
-                        )
-                        e_meses_duracion = st.number_input(
-                            "Duración en meses (0 = indefinido)", min_value=0, step=1,
-                            value=int(row.meses_duracion) if pd.notna(row.meses_duracion) else 0,
-                            key=f"e_duracion_concepto_{row.id}",
-                        )
+                        e_especial = e_modo in ("porcentaje_ingreso", "remanente")
+                        e_grupo = selector_categoria(f"e_{key_ns}_{row.id}", row.grupo)
                         meses_actuales = (
-                            [MESES_NOMBRE[int(m) - 1] for m in row.meses_aplicables.split(",")]
+                            obtener_nombres_meses(row.meses_aplicables)
                             if row.meses_aplicables else []
                         )
                         e_meses_aplicables = st.multiselect(
                             "Meses concretos (vacío = todos)", options=MESES_NOMBRE,
-                            default=meses_actuales, key=f"e_meses_concepto_{row.id}",
+                            default=meses_actuales, key=f"e_meses_{key_ns}_{row.id}",
                         )
-                        if st.form_submit_button("Guardar cambios"):
-                            cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta else None
-                            meses_num = [MESES_NOMBRE.index(m) + 1 for m in e_meses_aplicables] or None
-                            db.actualizar_concepto(
-                                row.id, cuenta_id, e_nombre.strip(), e_tipo, e_modo, e_grupo, e_importe,
-                                e_fecha_inicio, e_meses_duracion or None, meses_num,
+                        importes_actuales = proyeccion._parse_importes_meses(getattr(row, "importes_meses", None))
+                        e_importes_meses = {}
+                        if e_meses_aplicables and e_modo == "fijo":
+                            st.caption("Importe de cada mes seleccionado:")
+                            cols_meses = st.columns(len(e_meses_aplicables))
+                            for i, nombre_mes in enumerate(e_meses_aplicables):
+                                num_mes = MESES_NOMBRE.index(nombre_mes) + 1
+                                e_importes_meses[num_mes] = cols_meses[i].number_input(
+                                    nombre_mes, min_value=0.0, step=0.01, format="%.2f",
+                                    value=float(importes_actuales.get(num_mes, row.importe)),
+                                    key=f"e_importe_mes_{key_ns}_{row.id}_{num_mes}",
+                                )
+
+                        with st.form(f"editar_{key_ns}_{row.id}"):
+                            opciones_cuenta = list(cuentas["nombre"]) if not cuentas.empty else []
+                            indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
+                            e_cuenta = st.selectbox(
+                                "Cuenta", opciones_cuenta, index=indice_cuenta if opciones_cuenta else None,
+                                key=f"e_cuenta_{key_ns}_{row.id}",
                             )
-                            st.success("Guardado")
+                            e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_{key_ns}_{row.id}")
+                            e_tipo = "gasto" if e_especial else tipo_fijo
+                            if e_especial:
+                                st.caption("Se contabiliza como salida (gasto) de ese mes.")
+                            c1, c2 = st.columns(2)
+                            valor_importe = float(row.importe) if pd.notna(row.importe) else 0.0
+                            if e_modo == "porcentaje_ingreso":
+                                e_importe = c1.number_input(
+                                    "Porcentaje de los ingresos del mes (%)", min_value=0.0, max_value=100.0,
+                                    step=0.5, format="%.1f", value=valor_importe,
+                                    key=f"e_importe_{key_ns}_{row.id}",
+                                )
+                            elif e_modo == "remanente":
+                                c1.caption("Se calcula solo.")
+                                e_importe = 0.0
+                            elif e_importes_meses:
+                                e_importe = c1.number_input(
+                                    "Importe el resto de meses (€)", min_value=0.0, step=0.01, format="%.2f",
+                                    value=valor_importe, key=f"e_importe_{key_ns}_{row.id}",
+                                )
+                            else:
+                                e_importe = c1.number_input(
+                                    "Importe mensual (€)", min_value=0.0, step=0.01, format="%.2f",
+                                    value=valor_importe, key=f"e_importe_{key_ns}_{row.id}",
+                                )
+                            e_fecha_inicio = c2.date_input(
+                                "Fecha de inicio", value=pd.Timestamp(row.fecha_inicio).date(),
+                                key=f"e_fecha_{key_ns}_{row.id}",
+                            )
+                            e_meses_duracion = st.number_input(
+                                "Duración en meses (0 = indefinido)", min_value=0, step=1,
+                                value=int(row.meses_duracion) if pd.notna(row.meses_duracion) else 0,
+                                key=f"e_duracion_{key_ns}_{row.id}",
+                            )
+                            if st.form_submit_button("Guardar cambios"):
+                                cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta else None
+                                meses_num = [MESES_NOMBRE.index(m) + 1 for m in e_meses_aplicables] or None
+                                importes_map = e_importes_meses if e_importes_meses else None
+                                db.actualizar_concepto(
+                                    row.id, cuenta_id, e_nombre.strip(), e_tipo, e_modo, e_grupo, e_importe,
+                                    e_fecha_inicio, e_meses_duracion or None, meses_num, importes_map,
+                                )
+                                st.success("Guardado")
+                                st.rerun()
+
+                        c3, c4 = st.columns([1, 1], vertical_alignment="bottom")
+                        activo = c3.checkbox("Activo", value=bool(row.activo), key=f"activo_{key_ns}_{row.id}")
+                        if activo != bool(row.activo):
+                            db.actualizar_concepto_activo(row.id, activo)
+                            st.rerun()
+                        if c4.button("Eliminar", key=f"del_{key_ns}_{row.id}"):
+                            db.eliminar_concepto(row.id)
                             st.rerun()
 
-                    c3, c4 = st.columns([1, 1], vertical_alignment="bottom")
-                    activo = c3.checkbox("Activo", value=bool(row.activo), key=f"activo_concepto_{row.id}")
-                    if activo != bool(row.activo):
-                        db.actualizar_concepto_activo(row.id, activo)
-                        st.rerun()
-                    if c4.button("Eliminar", key=f"del_concepto_{row.id}"):
-                        db.eliminar_concepto(row.id)
-                        st.rerun()
+    with tabs[2]:
+        seccion_conceptos("ingreso", "ingreso")
 
-    # ----------------------------------------------------- Movimientos puntuales --
     with tabs[3]:
+        seccion_conceptos("gasto", "gastorec")
+
+    with tabs[4]:
         cuentas = db.cargar_cuentas()
         conceptos_var = db.cargar_conceptos()
         conceptos_var = conceptos_var[conceptos_var["modo"] == "variable"] if not conceptos_var.empty else conceptos_var
@@ -756,7 +853,7 @@ elif pagina == "Cuentas":
                     st.rerun()
 
     # -------------------------------------------------- Ahorros e inversiones --
-    with tabs[4]:
+    with tabs[5]:
         cuentas = db.cargar_cuentas()
         with st.expander("➕ Añadir meta de ahorro/inversión", expanded=False):
             tipo_nuevo = st.radio("Tipo", ["ahorro", "inversión"], horizontal=True, key="ahorro_tipo_nuevo")
@@ -800,85 +897,86 @@ elif pagina == "Cuentas":
                 beneficio = row.actual - row.aportado - row.comisiones
                 rentabilidad = (beneficio / row.aportado * 100) if row.aportado else None
                 titulo = f"{row.nombre} · {row.instrumento or row.tipo} · {row.actual:,.0f} €"
-                abierto = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"ahorro_{row.id}")
+                abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"ahorro_{row.id}")
                 if abierto:
-                    subir_logo("ahorros", row.id, getattr(row, "logo", None), f"ahorro_{row.id}")
+                    with contenedor:
+                        subir_logo("ahorros", row.id, f"ahorro_{row.id}")
 
-                    delta_txt = f"{beneficio:,.2f} €"
-                    if rentabilidad is not None:
-                        delta_txt += f" ({rentabilidad:+.1f} %)"
-                    st.metric("Valor actual", f"{row.actual:,.2f} €", delta=delta_txt)
+                        delta_txt = f"{beneficio:,.2f} €"
+                        if rentabilidad is not None:
+                            delta_txt += f" ({rentabilidad:+.1f} %)"
+                        st.metric("Valor actual", f"{row.actual:,.2f} €", delta=delta_txt)
 
-                    if row.objetivo:
-                        progreso = row.actual / row.objetivo if row.objetivo else 0
-                        st.progress(min(max(progreso, 0.0), 1.0))
-                        st.caption(f"Objetivo: {row.objetivo:,.2f} €")
+                        if row.objetivo:
+                            progreso = row.actual / row.objetivo if row.objetivo else 0
+                            st.progress(min(max(progreso, 0.0), 1.0))
+                            st.caption(f"Objetivo: {row.objetivo:,.2f} €")
 
-                    with st.form(f"editar_ahorro_{row.id}"):
-                        opciones_cuenta = ["(sin cuenta)"] + (list(cuentas["nombre"]) if not cuentas.empty else [])
-                        indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
-                        e_cuenta = st.selectbox(
-                            "Cuenta", opciones_cuenta, index=indice_cuenta, key=f"e_cuenta_ahorro_{row.id}",
-                        )
-                        e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_ahorro_{row.id}")
-                        c1, c2 = st.columns(2)
-                        e_tipo = c1.radio(
-                            "Tipo", ["ahorro", "inversión"], horizontal=True,
-                            index=0 if row.tipo == "ahorro" else 1, key=f"e_tipo_ahorro_{row.id}",
-                        )
-                        indice_instr = INSTRUMENTOS.index(row.instrumento) if row.instrumento in INSTRUMENTOS else len(INSTRUMENTOS) - 1
-                        e_instrumento = c2.selectbox(
-                            "Instrumento", INSTRUMENTOS, index=indice_instr, key=f"e_instrumento_ahorro_{row.id}",
-                        )
-                        c3, c4 = st.columns(2)
-                        e_aportado = c3.number_input(
-                            "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.aportado), key=f"e_aportado_ahorro_{row.id}",
-                        )
-                        e_actual = c4.number_input(
-                            "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.actual), key=f"e_actual_ahorro_{row.id}",
-                        )
-                        c5, c6 = st.columns(2)
-                        e_comisiones = c5.number_input(
-                            "Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.comisiones), key=f"e_comisiones_ahorro_{row.id}",
-                        )
-                        e_objetivo = c6.number_input(
-                            "Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.objetivo), key=f"e_objetivo_ahorro_{row.id}",
-                        )
-                        e_aportacion = st.number_input(
-                            "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
-                            value=float(row.aportacion_mensual) if pd.notna(row.aportacion_mensual) else 0.0,
-                            key=f"e_aportacion_ahorro_{row.id}",
-                        )
-                        e_fecha_objetivo = st.date_input(
-                            "Fecha objetivo (opcional)",
-                            value=pd.Timestamp(row.fecha_objetivo).date() if row.fecha_objetivo else None,
-                            key=f"e_fechaobj_ahorro_{row.id}",
-                        )
-                        if st.form_submit_button("Guardar cambios"):
-                            cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta != "(sin cuenta)" else None
-                            db.actualizar_ahorro(
-                                row.id, cuenta_id, e_nombre.strip(), e_tipo, e_instrumento,
-                                e_objetivo, e_aportado, e_actual, e_comisiones,
-                                e_aportacion or None, e_fecha_objetivo,
+                        with st.form(f"editar_ahorro_{row.id}"):
+                            opciones_cuenta = ["(sin cuenta)"] + (list(cuentas["nombre"]) if not cuentas.empty else [])
+                            indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
+                            e_cuenta = st.selectbox(
+                                "Cuenta", opciones_cuenta, index=indice_cuenta, key=f"e_cuenta_ahorro_{row.id}",
                             )
-                            st.success("Guardado")
+                            e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_ahorro_{row.id}")
+                            c1, c2 = st.columns(2)
+                            e_tipo = c1.radio(
+                                "Tipo", ["ahorro", "inversión"], horizontal=True,
+                                index=0 if row.tipo == "ahorro" else 1, key=f"e_tipo_ahorro_{row.id}",
+                            )
+                            indice_instr = INSTRUMENTOS.index(row.instrumento) if row.instrumento in INSTRUMENTOS else len(INSTRUMENTOS) - 1
+                            e_instrumento = c2.selectbox(
+                                "Instrumento", INSTRUMENTOS, index=indice_instr, key=f"e_instrumento_ahorro_{row.id}",
+                            )
+                            c3, c4 = st.columns(2)
+                            e_aportado = c3.number_input(
+                                "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.aportado), key=f"e_aportado_ahorro_{row.id}",
+                            )
+                            e_actual = c4.number_input(
+                                "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.actual), key=f"e_actual_ahorro_{row.id}",
+                            )
+                            c5, c6 = st.columns(2)
+                            e_comisiones = c5.number_input(
+                                "Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.comisiones), key=f"e_comisiones_ahorro_{row.id}",
+                            )
+                            e_objetivo = c6.number_input(
+                                "Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.objetivo), key=f"e_objetivo_ahorro_{row.id}",
+                            )
+                            e_aportacion = st.number_input(
+                                "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
+                                value=float(row.aportacion_mensual) if pd.notna(row.aportacion_mensual) else 0.0,
+                                key=f"e_aportacion_ahorro_{row.id}",
+                            )
+                            e_fecha_objetivo = st.date_input(
+                                "Fecha objetivo (opcional)",
+                                value=pd.Timestamp(row.fecha_objetivo).date() if row.fecha_objetivo else None,
+                                key=f"e_fechaobj_ahorro_{row.id}",
+                            )
+                            if st.form_submit_button("Guardar cambios"):
+                                cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta != "(sin cuenta)" else None
+                                db.actualizar_ahorro(
+                                    row.id, cuenta_id, e_nombre.strip(), e_tipo, e_instrumento,
+                                    e_objetivo, e_aportado, e_actual, e_comisiones,
+                                    e_aportacion or None, e_fecha_objetivo,
+                                )
+                                st.success("Guardado")
+                                st.rerun()
+
+                        c7, c8 = st.columns([1, 1], vertical_alignment="bottom")
+                        activa = c7.checkbox("Activa", value=bool(row.activa), key=f"activa_ahorro_{row.id}")
+                        if activa != bool(row.activa):
+                            db.actualizar_ahorro_activa(row.id, activa)
+                            st.rerun()
+                        if c8.button("Eliminar", key=f"del_ahorro_{row.id}"):
+                            db.eliminar_ahorro(row.id)
                             st.rerun()
 
-                    c7, c8 = st.columns([1, 1], vertical_alignment="bottom")
-                    activa = c7.checkbox("Activa", value=bool(row.activa), key=f"activa_ahorro_{row.id}")
-                    if activa != bool(row.activa):
-                        db.actualizar_ahorro_activa(row.id, activa)
-                        st.rerun()
-                    if c8.button("Eliminar", key=f"del_ahorro_{row.id}"):
-                        db.eliminar_ahorro(row.id)
-                        st.rerun()
-
     # ------------------------------------------------------------- Planes --
-    with tabs[5]:
+    with tabs[6]:
         with st.expander("➕ Añadir plan", expanded=False):
             with st.form("nuevo_plan", clear_on_submit=True):
                 nombre = st.text_input("Nombre (ej. Comprar casa)")
@@ -929,7 +1027,7 @@ elif pagina == "Cuentas":
                         st.rerun()
 
     # --------------------------------------------------------- Proyección --
-    with tabs[6]:
+    with tabs[7]:
         cuentas = db.cargar_cuentas()
         if cuentas.empty:
             st.caption("Crea al menos una cuenta para ver la proyección.")
