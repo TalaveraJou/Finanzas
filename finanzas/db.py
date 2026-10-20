@@ -24,14 +24,21 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finanzas.db"
 #      (aquí la contraseña sí debe ir percent-encoded si tiene símbolos raros).
 
 def _secret(clave: str) -> str | None:
+    valor = None
     try:
         import streamlit as st
 
         if clave in st.secrets:
-            return str(st.secrets[clave])
+            valor = str(st.secrets[clave])
     except Exception:
         pass
-    return os.environ.get(clave)
+    if valor is None:
+        valor = os.environ.get(clave)
+    # Un valor vacío (p. ej. una variable de entorno definida pero en blanco)
+    # cuenta como "no configurado".
+    if valor is not None and valor.strip() == "":
+        return None
+    return valor
 
 
 def _build_url() -> URL | str | None:

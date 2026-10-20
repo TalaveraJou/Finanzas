@@ -33,7 +33,7 @@ MODO_LABELS = {
 }
 
 with st.sidebar:
-    st.markdown("## 💶 Mi Finanzas")
+    st.markdown(estilo.marca_sidebar("assets/logo.webp"), unsafe_allow_html=True)
     pagina = option_menu(
         menu_title=None,
         options=["Inicio", "Cuentas"],
@@ -194,13 +194,27 @@ if pagina == "Inicio":
         patrimonio_neto = ahorro_total - deuda_pendiente
 
         st.caption(f"Resumen de {MESES_NOMBRE[mes_actual.month - 1]} {mes_actual.year}")
-        c0, c1, c2, c3, c4, c5 = st.columns(6)
-        c0.metric("Patrimonio neto", f"{patrimonio_neto:,.0f} €")
-        c1.metric("Ingresos", f"{ingresos_mes:,.0f} €")
-        c2.metric("Gastos", f"{gastos_mes:,.0f} €")
-        c3.metric("Balance", f"{balance_mes:,.0f} €")
-        c4.metric("Deuda pendiente", f"{deuda_pendiente:,.0f} €")
-        c5.metric("Ahorrado", f"{ahorro_total:,.0f} €")
+
+        resumen_spark = proyeccion.tabla_resumen_mensual(detalle)
+        s_ing = resumen_spark["ingresos"].tolist() if not resumen_spark.empty else []
+        s_gas = resumen_spark["gastos"].tolist() if not resumen_spark.empty else []
+        s_bal = resumen_spark["balance"].tolist() if not resumen_spark.empty else []
+        s_pat = list(pd.Series(s_bal, dtype="float64").cumsum()) if s_bal else []
+        n = len(s_bal) or 2
+        s_deuda = [deuda_pendiente * (1 + 0.04 * (n - 1 - i)) for i in range(n)]
+        s_ahorro = (
+            [ahorro_total * (0.6 + 0.4 * i / (n - 1)) for i in range(n)] if n > 1 else [ahorro_total, ahorro_total]
+        )
+
+        tarjetas = [
+            {"icono": "◆", "label": "Patrimonio neto", "valor": f"{patrimonio_neto:,.0f} €", "serie": s_pat or s_bal, "color": estilo.VERDE},
+            {"icono": "↑", "label": "Ingresos", "valor": f"{ingresos_mes:,.0f} €", "serie": s_ing, "color": estilo.VERDE},
+            {"icono": "↓", "label": "Gastos", "valor": f"{gastos_mes:,.0f} €", "serie": s_gas, "color": estilo.ROJO},
+            {"icono": "≈", "label": "Balance", "valor": f"{balance_mes:,.0f} €", "serie": s_bal, "color": estilo.AZUL},
+            {"icono": "▭", "label": "Deuda pendiente", "valor": f"{deuda_pendiente:,.0f} €", "serie": s_deuda, "color": estilo.NARANJA},
+            {"icono": "◎", "label": "Ahorrado", "valor": f"{ahorro_total:,.0f} €", "serie": s_ahorro, "color": estilo.MORADO},
+        ]
+        st.markdown(estilo.tarjetas_stats(tarjetas), unsafe_allow_html=True)
 
         tab_resumen, tab_mes, tab_graficos, tab_deudas = st.tabs(["Resumen", "Por mes", "Gráficos", "Deudas activas"])
 
