@@ -70,6 +70,30 @@ def _pk() -> str:
     return "BIGSERIAL PRIMARY KEY" if _es_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
 
+# Caché de lecturas: contra una base de datos remota (Supabase) cada SELECT es
+# una ida y vuelta por red, y Streamlit reejecuta todo el script en cada clic.
+# Cacheamos los resultados y vaciamos la caché solo cuando se escribe, así las
+# interacciones no vuelven a consultar la base de datos salvo que algo cambie.
+
+def _cache(func):
+    try:
+        import streamlit as st
+
+        return st.cache_data(ttl=600, show_spinner=False)(func)
+    except Exception:
+        return func
+
+
+def _invalidar() -> None:
+    try:
+        import streamlit as st
+
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+
+@_cache
 def _leer(sql: str, params: dict | None = None) -> pd.DataFrame:
     with _get_engine().connect() as conn:
         return pd.read_sql_query(text(sql), conn, params=params or {})
@@ -80,9 +104,19 @@ def _ejecutar(sql: str, params=None) -> None:
         if not _es_postgres():
             conn.exec_driver_sql("PRAGMA foreign_keys = ON")
         conn.execute(text(sql), params if params is not None else {})
+    _invalidar()
+
+
+_inicializado = False
 
 
 def init_db() -> None:
+    # El esquema solo hace falta crearlo una vez por proceso. Repetir los
+    # CREATE TABLE en cada consulta multiplicaba las idas y vueltas a la base de
+    # datos remota (Supabase) y hacía lenta cada recarga.
+    global _inicializado
+    if _inicializado:
+        return
     pk = _pk()
     with _get_engine().begin() as conn:
         if not _es_postgres():
@@ -205,6 +239,7 @@ def init_db() -> None:
                     "Deporte", "Nómina", "Freelance", "Inversiones", "Otros",
                 )],
             )
+    _inicializado = True
 
 
 # ---------------------------------------------------------------- Cuentas ----
@@ -583,9 +618,8 @@ def anadir_categoria(nombre: str) -> None:
 
 def cargar_categorias() -> list[str]:
     init_db()
-    with _get_engine().connect() as conn:
-        filas = conn.execute(text("SELECT nombre FROM categorias ORDER BY nombre")).fetchall()
-    return [f[0] for f in filas]
+    df = _leer("SELECT nombre FROM categorias ORDER BY nombre")
+    return df["nombre"].tolist() if not df.empty else []
 
 
 def eliminar_categoria(nombre: str) -> None:
