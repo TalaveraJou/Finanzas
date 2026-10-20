@@ -1,6 +1,7 @@
 import base64
 import datetime as dt
 import io
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -39,8 +40,8 @@ with st.sidebar:
         estilo.marca_sidebar("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
         unsafe_allow_html=True,
     )
-    opciones = ["Inicio", "Flujo de Caja", "Inversiones", "Ahorros e Inversiones", "Cuentas"]
-    iconos = ["speedometer2", "arrow-left-right", "graph-up-arrow", "piggy-bank", "wallet2"]
+    opciones = ["Inicio", "Flujo de Caja", "Inversiones", "Objetivos y Metas", "Ahorros e Inversiones", "Cuentas"]
+    iconos = ["speedometer2", "arrow-left-right", "graph-up-arrow", "flag", "piggy-bank", "wallet2"]
     if auth.es_superadmin():
         opciones.append("Admin")
         iconos.append("shield-lock")
@@ -762,6 +763,169 @@ elif pagina == "Inversiones":
                     ),
                     unsafe_allow_html=True,
                 )
+
+# ===================================================================== Objetivos y Metas ====
+
+elif pagina == "Objetivos y Metas":
+    st.title("Objetivos y Metas")
+
+    ahorros = db.cargar_ahorros()
+    planes = db.cargar_planes()
+    metas = ahorros[(ahorros["objetivo"] > 0) & ahorros["activa"]] if not ahorros.empty else ahorros
+
+    st.markdown("**Tus metas de ahorro e inversión**")
+    if metas.empty:
+        st.caption(
+            "Pon un objetivo (€) en una meta de ahorro o inversión en "
+            "**Ahorros e Inversiones** para verla aquí con su progreso."
+        )
+    else:
+        for row in metas.itertuples():
+            progreso = min(max(row.actual / row.objetivo, 0.0), 1.0) if row.objetivo else 0.0
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**{row.nombre}**")
+                c2.markdown(f"{row.actual:,.0f} € / {row.objetivo:,.0f} €")
+                st.progress(progreso)
+                if row.actual >= row.objetivo:
+                    st.caption("¡Objetivo alcanzado! 🎉")
+                elif row.aportacion_mensual and row.aportacion_mensual > 0:
+                    meses_restantes = math.ceil((row.objetivo - row.actual) / row.aportacion_mensual)
+                    fecha_estim = (pd.Timestamp.today().to_period("M") + meses_restantes).to_timestamp()
+                    st.caption(
+                        f"{progreso * 100:.0f} % completado · a {row.aportacion_mensual:,.0f} €/mes, "
+                        f"lo alcanzarás en ~{meses_restantes} meses "
+                        f"({MESES_NOMBRE[fecha_estim.month - 1]} {fecha_estim.year})"
+                    )
+                else:
+                    st.caption(f"{progreso * 100:.0f} % completado · sin aportación mensual programada")
+
+    st.markdown("**Planes a largo plazo**")
+    if planes.empty:
+        st.caption("Aún no tienes planes a largo plazo. Añádelos en **Cuentas y Movimientos → Planes**.")
+    else:
+        for row in planes.itertuples():
+            with st.container(border=True):
+                st.markdown(f"**{row.nombre}** · {row.importe_objetivo:,.0f} €")
+                if row.descripcion:
+                    st.caption(row.descripcion)
+                if row.fecha_objetivo:
+                    fecha = pd.Timestamp(row.fecha_objetivo)
+                    dias = (fecha - pd.Timestamp.today().normalize()).days
+                    if dias > 0:
+                        st.caption(f"Objetivo: {fecha.strftime('%d %b %Y')} · faltan {dias} días")
+                    else:
+                        st.caption(f"Fecha objetivo: {fecha.strftime('%d %b %Y')} (ya pasada)")
+
+    st.divider()
+    st.markdown("### Simulador de interés compuesto")
+    st.caption("Proyección orientativa a partir de los datos que indiques abajo: no tiene en cuenta inflación, impuestos ni comisiones.")
+    c1, c2, c3, c4 = st.columns(4)
+    capital_inicial = c1.slider("Capital inicial (€)", 0, 100_000, 1_000, step=100)
+    aportacion_sim = c2.slider("Aportación mensual (€)", 0, 2_000, 100, step=10)
+    anos_sim = c3.slider("Años", 1, 40, 10)
+    rentabilidad_sim = c4.slider("Rentabilidad anual esperada (%)", 0.0, 15.0, 6.0, step=0.5)
+
+    r_mensual = rentabilidad_sim / 100 / 12
+    meses_sim = anos_sim * 12
+    valores_sim = []
+    saldo = float(capital_inicial)
+    for _ in range(meses_sim + 1):
+        valores_sim.append(saldo)
+        saldo = saldo * (1 + r_mensual) + aportacion_sim
+
+    total_aportado = capital_inicial + aportacion_sim * meses_sim
+    valor_final = valores_sim[-1]
+    intereses_generados = valor_final - total_aportado
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Aportado total", f"{total_aportado:,.0f} €")
+    k2.metric("Intereses generados", f"{intereses_generados:,.0f} €")
+    k3.metric("Valor final estimado", f"{valor_final:,.0f} €")
+
+    fechas_sim = [pd.Timestamp.today().normalize() + pd.DateOffset(months=i) for i in range(meses_sim + 1)]
+    fig_sim = px.area(x=fechas_sim, y=valores_sim, labels={"x": "Fecha", "y": "€"})
+    fig_sim.update_traces(line_color=estilo.ACCENT, fillcolor="rgba(37,99,235,0.12)")
+    estilo.aplicar_tema_plotly(fig_sim)
+    fig_sim.update_layout(height=320)
+    st.plotly_chart(fig_sim, width="stretch")
+
+    st.divider()
+    st.markdown("### Recomendaciones")
+
+    conceptos = db.cargar_conceptos()
+    deudas = db.cargar_deudas()
+    movimientos = db.cargar_movimientos()
+    valores = db.cargar_valores_mensuales()
+    hoy = pd.Timestamp.today().normalize()
+    mes_actual = hoy.to_period("M")
+    periodos_hist = proyeccion.meses_entre(mes_actual - 23, mes_actual)
+    detalle_hist = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos_hist)
+    detalle_mes = detalle_hist[detalle_hist["periodo"] == mes_actual] if not detalle_hist.empty else detalle_hist
+    ingresos_mes = detalle_mes.loc[detalle_mes["tipo"] == "ingreso", "importe"].sum()
+    gastos_mes = detalle_mes.loc[detalle_mes["tipo"] == "gasto", "importe"].abs().sum()
+    ahorro_mes = detalle_mes.loc[detalle_mes["tipo"] == "ahorro", "importe"].abs().sum()
+    tasa_ahorro = (ahorro_mes / ingresos_mes * 100) if ingresos_mes else 0.0
+    deuda_pendiente = deudas.loc[deudas["activa"], "importe_pendiente"].sum() if not deudas.empty else 0.0
+
+    meta_ahorro = 20.0
+    recomendaciones = []
+    if ingresos_mes > 0:
+        if tasa_ahorro < meta_ahorro:
+            recomendaciones.append((
+                "info", "Tasa de ahorro",
+                f"Ahorras un {tasa_ahorro:.1f} % de tus ingresos este mes, por debajo del {meta_ahorro:.0f} % "
+                "recomendado. Revisa tus gastos variables para aumentar el margen.",
+            ))
+        else:
+            recomendaciones.append((
+                "ok", "Tasa de ahorro",
+                f"Ahorras un {tasa_ahorro:.1f} % de tus ingresos este mes, por encima del {meta_ahorro:.0f} % "
+                "recomendado. Vas bien encaminado.",
+            ))
+
+    emergencia = ahorros[ahorros["nombre"].str.contains("emergencia", case=False, na=False)] if not ahorros.empty else ahorros
+    if not emergencia.empty and gastos_mes:
+        meses_cubiertos = emergencia.iloc[0]["actual"] / gastos_mes
+        if meses_cubiertos < 3:
+            recomendaciones.append((
+                "info", "Fondo de emergencia",
+                f"Tu fondo de emergencia cubre {meses_cubiertos:.1f} meses de gastos; lo recomendable son al menos 3.",
+            ))
+        else:
+            recomendaciones.append((
+                "ok", "Fondo de emergencia",
+                f"Tu fondo de emergencia cubre {meses_cubiertos:.1f} meses de gastos. Nivel saludable.",
+            ))
+    elif emergencia.empty:
+        recomendaciones.append((
+            "info", "Fondo de emergencia",
+            "No tienes ninguna meta de ahorro llamada \"emergencia\". Considera crear una con 3-6 meses de gastos.",
+        ))
+
+    if deuda_pendiente > 0 and ingresos_mes:
+        ratio_deuda = deuda_pendiente / (ingresos_mes * 12) * 100
+        recomendaciones.append((
+            "info", "Deuda pendiente",
+            f"Tu deuda pendiente equivale a un {ratio_deuda:.0f} % de tus ingresos anuales "
+            "estimados (sobre la base de este mes).",
+        ))
+
+    cartera = ahorros[(ahorros["tipo"] == "inversión") & ahorros["activa"]] if not ahorros.empty else ahorros
+    if not cartera.empty:
+        n_instrumentos = cartera["instrumento"].nunique()
+        if n_instrumentos < 3:
+            recomendaciones.append((
+                "info", "Diversificación",
+                f"Tu cartera de inversión está en {n_instrumentos} tipo(s) de instrumento. "
+                "Diversificar entre más tipos reduce el riesgo.",
+            ))
+
+    if not recomendaciones:
+        st.caption("Añade ingresos, gastos o metas de ahorro para recibir recomendaciones.")
+    else:
+        for tono, titulo, texto in recomendaciones:
+            st.markdown(estilo.tarjeta_info(tono, "Recomendación", titulo, texto), unsafe_allow_html=True)
 
 # ===================================================================== Ahorros e Inversiones ====
 
