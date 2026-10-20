@@ -564,6 +564,18 @@ def fila_presupuesto(categoria: str, gasto: float, limite: float) -> str:
     )
 
 
+def fila_diversificacion(color: str, nombre: str, valor: float, pct: float) -> str:
+    """Barra de diversificación de cartera: nombre del instrumento, su peso en
+    la cartera y una barra de color proporcional."""
+    pct_barra = max(0.0, min(pct, 100.0))
+    return (
+        f'<div class="pres-row"><div class="pres-top">'
+        f'<div class="pres-cat"><span class="leg-dot" style="background:{color};"></span>{nombre}</div>'
+        f'<div class="pres-vals" style="margin-top:0;">{valor:,.0f} € · {pct:.0f}%</div></div>'
+        f'<div class="pres-bar"><div style="width:{pct_barra:.0f}%;background:{color};"></div></div></div>'
+    )
+
+
 def tarjeta_info(tono: str, etiqueta: str, titulo: str, texto: str) -> str:
     return (
         f'<div class="info-card {tono}"><div class="tag">{etiqueta}</div>'

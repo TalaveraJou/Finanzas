@@ -39,8 +39,8 @@ with st.sidebar:
         estilo.marca_sidebar("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
         unsafe_allow_html=True,
     )
-    opciones = ["Inicio", "Flujo de Caja", "Cuentas"]
-    iconos = ["speedometer2", "arrow-left-right", "wallet2"]
+    opciones = ["Inicio", "Flujo de Caja", "Inversiones", "Ahorros e Inversiones", "Cuentas"]
+    iconos = ["speedometer2", "arrow-left-right", "graph-up-arrow", "piggy-bank", "wallet2"]
     if auth.es_superadmin():
         opciones.append("Admin")
         iconos.append("shield-lock")
@@ -218,8 +218,13 @@ if pagina == "Inicio":
     else:
         hoy = pd.Timestamp.today().normalize()
         mes_actual = hoy.to_period("M")
-        periodos = proyeccion.meses_entre(mes_actual - 1, mes_actual + 11)
-        detalle = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos)
+
+        # Serie histórica real (meses ya transcurridos hasta hoy, sin proyectar
+        # hacia el futuro) — es la única fuente de los KPIs y gráficos de esta
+        # página, para que nunca muestren datos inventados.
+        periodos_hist = proyeccion.meses_entre(mes_actual - 23, mes_actual)
+        detalle_hist = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos_hist)
+        detalle = detalle_hist
 
         detalle_mes = detalle[detalle["periodo"] == mes_actual] if not detalle.empty else detalle
         ingresos_mes = detalle_mes.loc[detalle_mes["tipo"] == "ingreso", "importe"].sum()
@@ -232,26 +237,15 @@ if pagina == "Inicio":
         ahorro_total = ahorros["actual"].sum() if not ahorros.empty else 0.0
         patrimonio_neto = ahorro_total - deuda_pendiente
 
-        resumen_spark = proyeccion.tabla_resumen_mensual(detalle)
-        s_ing = resumen_spark["ingresos"].tolist() if not resumen_spark.empty else []
-        s_gas = resumen_spark["gastos"].tolist() if not resumen_spark.empty else []
-        s_bal = resumen_spark["balance"].tolist() if not resumen_spark.empty else []
-        s_pat = list(pd.Series(s_bal, dtype="float64").cumsum()) if s_bal else []
-        n = len(s_bal) or 2
-        s_deuda = [deuda_pendiente * (1 + 0.04 * (n - 1 - i)) for i in range(n)]
-        s_ahorro = (
-            [ahorro_total * (0.6 + 0.4 * i / (n - 1)) for i in range(n)] if n > 1 else [ahorro_total, ahorro_total]
-        )
-
         logos_cuenta = dict(zip(cuentas["nombre"], cuentas.get("logo", pd.Series(dtype=str))))
 
         # ---- Cabecera de saludo ----
+        # El cambio de patrimonio "este mes" es el balance real del mes (ingresos
+        # menos gastos, deuda y ahorro ya registrados), no una proyección.
         nombre_usuario = (auth.usuario_actual() or {}).get("nombre") or "ahí"
-        delta_pat_pct = 0.0
-        delta_pat_eur = 0.0
-        if s_pat and len(s_pat) >= 2 and s_pat[-2]:
-            delta_pat_eur = s_pat[-1] - s_pat[-2]
-            delta_pat_pct = (delta_pat_eur / abs(s_pat[-2])) * 100 if s_pat[-2] else 0.0
+        delta_pat_eur = balance_mes
+        patrimonio_anterior = patrimonio_neto - balance_mes
+        delta_pat_pct = (delta_pat_eur / abs(patrimonio_anterior) * 100) if patrimonio_anterior else 0.0
         clase_delta = "pos" if delta_pat_eur >= 0 else "neg"
         signo = "+" if delta_pat_eur >= 0 else ""
         st.markdown(
@@ -284,10 +278,6 @@ if pagina == "Inicio":
         st.markdown(f'<div class="kpi-row">{kpis_html}</div>', unsafe_allow_html=True)
 
         # ---- Evolución + distribución de activos ----
-        # Serie histórica (meses pasados hasta hoy), distinta de las sparklines de
-        # las tarjetas KPI (que miran también hacia adelante para la proyección).
-        periodos_hist = proyeccion.meses_entre(mes_actual - 23, mes_actual)
-        detalle_hist = proyeccion.detalle_mensual(conceptos, deudas, ahorros, movimientos, valores, periodos_hist)
         resumen_hist = proyeccion.tabla_resumen_mensual(detalle_hist)
         periodos_hist_str = [str(p) for p in periodos_hist]
         resumen_hist = (
@@ -500,7 +490,7 @@ if pagina == "Inicio":
                 col_izq, col_der = st.columns(2)
                 with col_izq:
                     st.markdown("**Ingresos vs. salidas (12 meses)**")
-                    resumen = proyeccion.tabla_resumen_mensual(detalle)
+                    resumen = proyeccion.tabla_resumen_mensual(detalle).tail(12)
                     resumen_largo = resumen.melt(
                         id_vars="periodo", value_vars=["ingresos", "gastos"],
                         var_name="tipo", value_name="importe",
@@ -686,6 +676,219 @@ elif pagina == "Flujo de Caja":
                     hide_index=True, width="stretch",
                 )
 
+# ===================================================================== Inversiones ====
+
+elif pagina == "Inversiones":
+    st.title("Cartera de Inversión")
+
+    ahorros = db.cargar_ahorros()
+    cartera = ahorros[(ahorros["tipo"] == "inversión") & ahorros["activa"]] if not ahorros.empty else ahorros
+
+    if cartera.empty:
+        st.info(
+            "Añade una inversión en **Cuentas y Movimientos → Ahorros e inversiones** "
+            "(tipo \"Inversión\") para ver tu cartera aquí."
+        )
+    else:
+        capital_invertido = cartera["aportado"].sum()
+        valor_mercado = cartera["actual"].sum()
+        comisiones_total = cartera["comisiones"].sum()
+        plusvalia = valor_mercado - capital_invertido - comisiones_total
+        rentabilidad = (plusvalia / capital_invertido * 100) if capital_invertido else 0.0
+        clase_plus = "pos" if plusvalia >= 0 else "neg"
+        signo = "+" if plusvalia >= 0 else ""
+
+        kpis_html = (
+            estilo.tarjeta_kpi_pro(
+                "💰", "Capital invertido", f"{capital_invertido:,.0f} €", f"{len(cartera)} posiciones activas",
+            )
+            + estilo.tarjeta_kpi_pro("📊", "Valor de mercado", f"{valor_mercado:,.0f} €", "Valor actual de la cartera")
+            + estilo.tarjeta_kpi_pro(
+                "📈" if plusvalia >= 0 else "📉", "Plusvalía latente", f"{signo}{plusvalia:,.0f} €",
+                f"{signo}{rentabilidad:.1f} % sobre lo aportado", clase_plus,
+            )
+            + estilo.tarjeta_kpi_pro("🏦", "Comisiones pagadas", f"{comisiones_total:,.0f} €", "Acumulado histórico")
+        )
+        st.markdown(f'<div class="kpi-row">{kpis_html}</div>', unsafe_allow_html=True)
+
+        col_izq, col_der = st.columns([3, 2])
+        with col_izq:
+            with st.container(border=True):
+                st.markdown("**Posiciones**")
+                tabla = cartera.copy()
+                tabla["plusvalia"] = tabla["actual"] - tabla["aportado"] - tabla["comisiones"]
+                tabla["rentabilidad %"] = tabla.apply(
+                    lambda r: (r["plusvalia"] / r["aportado"] * 100) if r["aportado"] else 0.0, axis=1,
+                )
+                tabla_mostrar = tabla[
+                    ["nombre", "instrumento", "cuenta", "aportado", "actual", "plusvalia", "rentabilidad %"]
+                ].sort_values("actual", ascending=False)
+
+                def _color_plusvalia(val):
+                    return f"color: {estilo.VERDE_TXT}" if val >= 0 else f"color: {estilo.ROJO_TXT}"
+
+                st.dataframe(
+                    tabla_mostrar.style.format({
+                        "aportado": "{:,.2f} €", "actual": "{:,.2f} €",
+                        "plusvalia": "{:,.2f} €", "rentabilidad %": "{:+.1f} %",
+                    }).map(_color_plusvalia, subset=["plusvalia", "rentabilidad %"]),
+                    hide_index=True, width="stretch",
+                )
+        with col_der:
+            with st.container(border=True):
+                st.markdown("**Salud de la cartera**")
+                por_instrumento = cartera.groupby("instrumento")["actual"].sum().sort_values(ascending=False)
+                total_cartera = por_instrumento.sum()
+                if total_cartera > 0:
+                    colores_ciclo = estilo.PALETA_CATEGORIAS
+                    barras = "".join(
+                        estilo.fila_diversificacion(
+                            colores_ciclo[i % len(colores_ciclo)], (instr or "Sin clasificar"), valor,
+                            (valor / total_cartera * 100) if total_cartera else 0,
+                        )
+                        for i, (instr, valor) in enumerate(por_instrumento.items())
+                    )
+                    st.markdown(barras, unsafe_allow_html=True)
+                else:
+                    st.caption("Sin valor en cartera para mostrar diversificación.")
+
+                n_instrumentos = cartera["instrumento"].nunique()
+                diversificada = n_instrumentos >= 3
+                st.markdown(
+                    estilo.tarjeta_info(
+                        "ok" if diversificada else "info", "Diversificación",
+                        f"Cartera {'bien diversificada' if diversificada else 'concentrada en pocos instrumentos'}",
+                        f"Tienes posiciones en {n_instrumentos} tipo(s) de instrumento distinto(s).",
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+# ===================================================================== Ahorros e Inversiones ====
+
+elif pagina == "Ahorros e Inversiones":
+    st.title("Ahorros e Inversiones")
+
+    cuentas = db.cargar_cuentas()
+    with st.expander("➕ Añadir meta de ahorro/inversión", expanded=False):
+        tipo_nuevo = st.radio("Tipo", ["ahorro", "inversión"], horizontal=True, key="ahorro_tipo_nuevo")
+        instrumento_nuevo = st.selectbox("Instrumento", INSTRUMENTOS, key="ahorro_instrumento_nuevo")
+        with st.form("nuevo_ahorro", clear_on_submit=True):
+            cuenta_id = selector_cuenta(cuentas, "ahorro_cuenta", opcional=True)
+            nombre = st.text_input("Nombre (ej. Fondo de emergencia, Cuenta Trade Republic)")
+            c1, c2 = st.columns(2)
+            aportado = c1.number_input(
+                "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
+                help="Lo que has metido tú en total (principal), sin contar la revalorización.",
+            )
+            actual = c2.number_input(
+                "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
+                help="Lo que vale hoy. La diferencia con lo aportado es el beneficio o pérdida.",
+            )
+            c3, c4 = st.columns(2)
+            comisiones = c3.number_input("Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f")
+            objetivo = c4.number_input("Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f")
+            aportacion_mensual = st.number_input(
+                "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
+            )
+            fecha_objetivo = st.date_input("Fecha objetivo (opcional)", value=None)
+            if st.form_submit_button("Guardar"):
+                if not nombre.strip():
+                    st.warning("Pon un nombre.")
+                else:
+                    db.anadir_ahorro(
+                        cuenta_id, nombre.strip(), tipo_nuevo, instrumento_nuevo,
+                        objetivo, aportado, actual, comisiones,
+                        aportacion_mensual or None, fecha_objetivo,
+                    )
+                    st.success("Guardado")
+                    st.rerun()
+
+    ahorros = db.cargar_ahorros()
+    if ahorros.empty:
+        st.caption("Aún no tienes metas de ahorro ni inversiones.")
+    else:
+        for row in ahorros.itertuples():
+            beneficio = row.actual - row.aportado - row.comisiones
+            rentabilidad = (beneficio / row.aportado * 100) if row.aportado else None
+            titulo = f"{row.nombre} · {row.instrumento or row.tipo} · {row.actual:,.0f} €"
+            abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"ahorro_{row.id}")
+            if abierto:
+                with contenedor:
+                    subir_logo("ahorros", row.id, f"ahorro_{row.id}")
+
+                    delta_txt = f"{beneficio:,.2f} €"
+                    if rentabilidad is not None:
+                        delta_txt += f" ({rentabilidad:+.1f} %)"
+                    st.metric("Valor actual", f"{row.actual:,.2f} €", delta=delta_txt)
+
+                    if row.objetivo:
+                        progreso = row.actual / row.objetivo if row.objetivo else 0
+                        st.progress(min(max(progreso, 0.0), 1.0))
+                        st.caption(f"Objetivo: {row.objetivo:,.2f} €")
+
+                    with st.form(f"editar_ahorro_{row.id}"):
+                        opciones_cuenta = ["(sin cuenta)"] + (list(cuentas["nombre"]) if not cuentas.empty else [])
+                        indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
+                        e_cuenta = st.selectbox(
+                            "Cuenta", opciones_cuenta, index=indice_cuenta, key=f"e_cuenta_ahorro_{row.id}",
+                        )
+                        e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_ahorro_{row.id}")
+                        c1, c2 = st.columns(2)
+                        e_tipo = c1.radio(
+                            "Tipo", ["ahorro", "inversión"], horizontal=True,
+                            index=0 if row.tipo == "ahorro" else 1, key=f"e_tipo_ahorro_{row.id}",
+                        )
+                        indice_instr = INSTRUMENTOS.index(row.instrumento) if row.instrumento in INSTRUMENTOS else len(INSTRUMENTOS) - 1
+                        e_instrumento = c2.selectbox(
+                            "Instrumento", INSTRUMENTOS, index=indice_instr, key=f"e_instrumento_ahorro_{row.id}",
+                        )
+                        c3, c4 = st.columns(2)
+                        e_aportado = c3.number_input(
+                            "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
+                            value=float(row.aportado), key=f"e_aportado_ahorro_{row.id}",
+                        )
+                        e_actual = c4.number_input(
+                            "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
+                            value=float(row.actual), key=f"e_actual_ahorro_{row.id}",
+                        )
+                        c5, c6 = st.columns(2)
+                        e_comisiones = c5.number_input(
+                            "Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f",
+                            value=float(row.comisiones), key=f"e_comisiones_ahorro_{row.id}",
+                        )
+                        e_objetivo = c6.number_input(
+                            "Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
+                            value=float(row.objetivo), key=f"e_objetivo_ahorro_{row.id}",
+                        )
+                        e_aportacion = st.number_input(
+                            "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
+                            value=float(row.aportacion_mensual) if pd.notna(row.aportacion_mensual) else 0.0,
+                            key=f"e_aportacion_ahorro_{row.id}",
+                        )
+                        e_fecha_objetivo = st.date_input(
+                            "Fecha objetivo (opcional)",
+                            value=pd.Timestamp(row.fecha_objetivo).date() if row.fecha_objetivo else None,
+                            key=f"e_fechaobj_ahorro_{row.id}",
+                        )
+                        if st.form_submit_button("Guardar cambios"):
+                            cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta != "(sin cuenta)" else None
+                            db.actualizar_ahorro(
+                                row.id, cuenta_id, e_nombre.strip(), e_tipo, e_instrumento,
+                                e_objetivo, e_aportado, e_actual, e_comisiones,
+                                e_aportacion or None, e_fecha_objetivo,
+                            )
+                            st.success("Guardado")
+                            st.rerun()
+
+                    c7, c8 = st.columns([1, 1], vertical_alignment="bottom")
+                    activa = c7.checkbox("Activa", value=bool(row.activa), key=f"activa_ahorro_{row.id}")
+                    if activa != bool(row.activa):
+                        db.actualizar_ahorro_activa(row.id, activa)
+                        st.rerun()
+                    if c8.button("Eliminar", key=f"del_ahorro_{row.id}"):
+                        db.eliminar_ahorro(row.id)
+                        st.rerun()
+
 # ============================================= Cuentas y Movimientos ====
 
 elif pagina == "Cuentas":
@@ -693,7 +896,7 @@ elif pagina == "Cuentas":
 
     tabs = st.tabs([
         "Cuentas", "Deudas", "Ingresos", "Gastos recurrentes",
-        "Movimientos puntuales", "Ahorros e inversiones", "Planes", "Proyección",
+        "Movimientos puntuales", "Planes", "Proyección",
         "Presupuestos",
     ])
 
@@ -1173,131 +1376,8 @@ elif pagina == "Cuentas":
                     st.success("Eliminado")
                     st.rerun()
 
-    # -------------------------------------------------- Ahorros e inversiones --
-    with tabs[5]:
-        cuentas = db.cargar_cuentas()
-        with st.expander("➕ Añadir meta de ahorro/inversión", expanded=False):
-            tipo_nuevo = st.radio("Tipo", ["ahorro", "inversión"], horizontal=True, key="ahorro_tipo_nuevo")
-            instrumento_nuevo = st.selectbox("Instrumento", INSTRUMENTOS, key="ahorro_instrumento_nuevo")
-            with st.form("nuevo_ahorro", clear_on_submit=True):
-                cuenta_id = selector_cuenta(cuentas, "ahorro_cuenta", opcional=True)
-                nombre = st.text_input("Nombre (ej. Fondo de emergencia, Cuenta Trade Republic)")
-                c1, c2 = st.columns(2)
-                aportado = c1.number_input(
-                    "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
-                    help="Lo que has metido tú en total (principal), sin contar la revalorización.",
-                )
-                actual = c2.number_input(
-                    "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
-                    help="Lo que vale hoy. La diferencia con lo aportado es el beneficio o pérdida.",
-                )
-                c3, c4 = st.columns(2)
-                comisiones = c3.number_input("Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f")
-                objetivo = c4.number_input("Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f")
-                aportacion_mensual = st.number_input(
-                    "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
-                )
-                fecha_objetivo = st.date_input("Fecha objetivo (opcional)", value=None)
-                if st.form_submit_button("Guardar"):
-                    if not nombre.strip():
-                        st.warning("Pon un nombre.")
-                    else:
-                        db.anadir_ahorro(
-                            cuenta_id, nombre.strip(), tipo_nuevo, instrumento_nuevo,
-                            objetivo, aportado, actual, comisiones,
-                            aportacion_mensual or None, fecha_objetivo,
-                        )
-                        st.success("Guardado")
-                        st.rerun()
-
-        ahorros = db.cargar_ahorros()
-        if ahorros.empty:
-            st.caption("Aún no tienes metas de ahorro ni inversiones.")
-        else:
-            for row in ahorros.itertuples():
-                beneficio = row.actual - row.aportado - row.comisiones
-                rentabilidad = (beneficio / row.aportado * 100) if row.aportado else None
-                titulo = f"{row.nombre} · {row.instrumento or row.tipo} · {row.actual:,.0f} €"
-                abierto, contenedor = tarjeta_desplegable(getattr(row, "logo", None), titulo, f"ahorro_{row.id}")
-                if abierto:
-                    with contenedor:
-                        subir_logo("ahorros", row.id, f"ahorro_{row.id}")
-
-                        delta_txt = f"{beneficio:,.2f} €"
-                        if rentabilidad is not None:
-                            delta_txt += f" ({rentabilidad:+.1f} %)"
-                        st.metric("Valor actual", f"{row.actual:,.2f} €", delta=delta_txt)
-
-                        if row.objetivo:
-                            progreso = row.actual / row.objetivo if row.objetivo else 0
-                            st.progress(min(max(progreso, 0.0), 1.0))
-                            st.caption(f"Objetivo: {row.objetivo:,.2f} €")
-
-                        with st.form(f"editar_ahorro_{row.id}"):
-                            opciones_cuenta = ["(sin cuenta)"] + (list(cuentas["nombre"]) if not cuentas.empty else [])
-                            indice_cuenta = opciones_cuenta.index(row.cuenta) if row.cuenta in opciones_cuenta else 0
-                            e_cuenta = st.selectbox(
-                                "Cuenta", opciones_cuenta, index=indice_cuenta, key=f"e_cuenta_ahorro_{row.id}",
-                            )
-                            e_nombre = st.text_input("Nombre", value=row.nombre, key=f"e_nombre_ahorro_{row.id}")
-                            c1, c2 = st.columns(2)
-                            e_tipo = c1.radio(
-                                "Tipo", ["ahorro", "inversión"], horizontal=True,
-                                index=0 if row.tipo == "ahorro" else 1, key=f"e_tipo_ahorro_{row.id}",
-                            )
-                            indice_instr = INSTRUMENTOS.index(row.instrumento) if row.instrumento in INSTRUMENTOS else len(INSTRUMENTOS) - 1
-                            e_instrumento = c2.selectbox(
-                                "Instrumento", INSTRUMENTOS, index=indice_instr, key=f"e_instrumento_ahorro_{row.id}",
-                            )
-                            c3, c4 = st.columns(2)
-                            e_aportado = c3.number_input(
-                                "Aportado en total (€)", min_value=0.0, step=0.01, format="%.2f",
-                                value=float(row.aportado), key=f"e_aportado_ahorro_{row.id}",
-                            )
-                            e_actual = c4.number_input(
-                                "Valor actual (€)", min_value=0.0, step=0.01, format="%.2f",
-                                value=float(row.actual), key=f"e_actual_ahorro_{row.id}",
-                            )
-                            c5, c6 = st.columns(2)
-                            e_comisiones = c5.number_input(
-                                "Comisiones pagadas (€)", min_value=0.0, step=0.01, format="%.2f",
-                                value=float(row.comisiones), key=f"e_comisiones_ahorro_{row.id}",
-                            )
-                            e_objetivo = c6.number_input(
-                                "Objetivo (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
-                                value=float(row.objetivo), key=f"e_objetivo_ahorro_{row.id}",
-                            )
-                            e_aportacion = st.number_input(
-                                "Aportación mensual (€, opcional)", min_value=0.0, step=0.01, format="%.2f",
-                                value=float(row.aportacion_mensual) if pd.notna(row.aportacion_mensual) else 0.0,
-                                key=f"e_aportacion_ahorro_{row.id}",
-                            )
-                            e_fecha_objetivo = st.date_input(
-                                "Fecha objetivo (opcional)",
-                                value=pd.Timestamp(row.fecha_objetivo).date() if row.fecha_objetivo else None,
-                                key=f"e_fechaobj_ahorro_{row.id}",
-                            )
-                            if st.form_submit_button("Guardar cambios"):
-                                cuenta_id = mapa_cuentas(cuentas).get(e_cuenta) if e_cuenta != "(sin cuenta)" else None
-                                db.actualizar_ahorro(
-                                    row.id, cuenta_id, e_nombre.strip(), e_tipo, e_instrumento,
-                                    e_objetivo, e_aportado, e_actual, e_comisiones,
-                                    e_aportacion or None, e_fecha_objetivo,
-                                )
-                                st.success("Guardado")
-                                st.rerun()
-
-                        c7, c8 = st.columns([1, 1], vertical_alignment="bottom")
-                        activa = c7.checkbox("Activa", value=bool(row.activa), key=f"activa_ahorro_{row.id}")
-                        if activa != bool(row.activa):
-                            db.actualizar_ahorro_activa(row.id, activa)
-                            st.rerun()
-                        if c8.button("Eliminar", key=f"del_ahorro_{row.id}"):
-                            db.eliminar_ahorro(row.id)
-                            st.rerun()
-
     # ------------------------------------------------------------- Planes --
-    with tabs[6]:
+    with tabs[5]:
         with st.expander("➕ Añadir plan", expanded=False):
             with st.form("nuevo_plan", clear_on_submit=True):
                 nombre = st.text_input("Nombre (ej. Comprar casa)")
@@ -1348,7 +1428,7 @@ elif pagina == "Cuentas":
                         st.rerun()
 
     # --------------------------------------------------------- Proyección --
-    with tabs[7]:
+    with tabs[6]:
         cuentas = db.cargar_cuentas()
         if cuentas.empty:
             st.caption("Crea al menos una cuenta para ver la proyección.")
@@ -1374,7 +1454,7 @@ elif pagina == "Cuentas":
                 st.dataframe(proyeccion.estilo_proyeccion(pivot, detalle), width="stretch")
 
     # -------------------------------------------------------- Presupuestos --
-    with tabs[8]:
+    with tabs[7]:
         st.caption("Pon un límite de gasto mensual por categoría. El Flujo de Caja comparará el gasto real contra este límite.")
         categorias = db.cargar_categorias()
         presupuestos = db.cargar_presupuestos()
