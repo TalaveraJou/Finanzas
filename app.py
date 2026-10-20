@@ -563,6 +563,7 @@ elif pagina == "Cuentas":
     tabs = st.tabs([
         "Cuentas", "Deudas", "Ingresos", "Gastos recurrentes",
         "Movimientos puntuales", "Ahorros e inversiones", "Planes", "Proyección",
+        "Presupuestos",
     ])
 
     # ------------------------------------------------------------- Cuentas --
@@ -1240,6 +1241,33 @@ elif pagina == "Cuentas":
             else:
                 pivot = proyeccion.tabla_proyeccion_pivot(detalle)
                 st.dataframe(proyeccion.estilo_proyeccion(pivot, detalle), width="stretch")
+
+    # -------------------------------------------------------- Presupuestos --
+    with tabs[8]:
+        st.caption("Pon un límite de gasto mensual por categoría. El Flujo de Caja comparará el gasto real contra este límite.")
+        categorias = db.cargar_categorias()
+        presupuestos = db.cargar_presupuestos()
+        limites = dict(zip(presupuestos["categoria"], presupuestos["limite_mensual"])) if not presupuestos.empty else {}
+
+        with st.form("nuevo_presupuesto"):
+            c1, c2 = st.columns([3, 2])
+            categoria = c1.selectbox("Categoría", categorias, key="presu_cat")
+            limite = c2.number_input("Límite mensual (€)", min_value=0.0, step=10.0, format="%.2f", key="presu_limite")
+            if st.form_submit_button("Guardar límite", type="primary"):
+                db.guardar_presupuesto(categoria, limite)
+                st.success(f"Límite de {categoria} guardado")
+                st.rerun()
+
+        if presupuestos.empty:
+            st.caption("Aún no has fijado ningún límite.")
+        else:
+            for row in presupuestos.itertuples():
+                c1, c2, c3 = st.columns([3, 2, 1])
+                c1.write(f"**{row.categoria}**")
+                c2.write(f"{row.limite_mensual:,.2f} € / mes")
+                if c3.button("Eliminar", key=f"presu_del_{row.id}"):
+                    db.eliminar_presupuesto(row.id)
+                    st.rerun()
 
 
 # ===================================================================== Admin ====

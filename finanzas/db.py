@@ -16,7 +16,7 @@ SUPERADMIN_EMAIL = "alvarotalaverajou@icloud.com"
 # `propietario`, su email). Las tablas usuarios/accesos son globales.
 TABLAS_DATOS = (
     "cuentas", "conceptos", "deudas", "ahorros", "movimientos", "planes",
-    "categorias", "valores_mensuales",
+    "categorias", "valores_mensuales", "presupuestos",
 )
 
 CATEGORIAS_DEFECTO = (
@@ -279,6 +279,17 @@ def init_db() -> None:
                 id {pk},
                 nombre TEXT NOT NULL,
                 propietario TEXT
+            )
+            """
+        ))
+        conn.execute(text(
+            f"""
+            CREATE TABLE IF NOT EXISTS presupuestos (
+                id {pk},
+                categoria TEXT NOT NULL,
+                limite_mensual REAL NOT NULL,
+                propietario TEXT,
+                UNIQUE (categoria, propietario)
             )
             """
         ))
@@ -824,6 +835,35 @@ def eliminar_categoria(nombre: str, propietario: str | None = None) -> None:
     _ejecutar(
         "DELETE FROM categorias WHERE nombre = :nombre AND propietario = :prop",
         {"nombre": nombre, "prop": _prop(propietario)},
+    )
+
+
+# -------------------------------------------------------------- Presupuestos ----
+# Límite mensual de gasto por categoría, usado en Flujo de Caja para comparar
+# el gasto real del periodo contra el límite fijado.
+
+def guardar_presupuesto(categoria: str, limite_mensual: float, propietario: str | None = None) -> None:
+    init_db()
+    _ejecutar(
+        """INSERT INTO presupuestos (categoria, limite_mensual, propietario)
+           VALUES (:categoria, :limite, :prop)
+           ON CONFLICT (categoria, propietario) DO UPDATE SET limite_mensual = excluded.limite_mensual""",
+        {"categoria": categoria, "limite": limite_mensual, "prop": _prop(propietario)},
+    )
+
+
+def cargar_presupuestos(propietario: str | None = None) -> pd.DataFrame:
+    init_db()
+    return _leer(
+        "SELECT * FROM presupuestos WHERE propietario = :prop ORDER BY categoria",
+        {"prop": _prop(propietario)},
+    )
+
+
+def eliminar_presupuesto(id_: int, propietario: str | None = None) -> None:
+    _ejecutar(
+        "DELETE FROM presupuestos WHERE id = :id AND propietario = :prop",
+        {"id": id_, "prop": _prop(propietario)},
     )
 
 
