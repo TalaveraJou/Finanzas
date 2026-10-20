@@ -47,9 +47,17 @@ h1 {{ font-weight: 800; }}
 /* ---- Barra lateral ---- */
 [data-testid="stSidebar"] {{ background: {BG_SOFT}; border-right: 1px solid {BORDER}; }}
 [data-testid="stSidebar"] > div:first-child {{ padding-top: 1.4rem; }}
-.brand {{ display:flex; align-items:center; gap:11px; padding:2px 4px 16px; }}
-.brand-logo {{ width:40px; height:40px; border-radius:12px; object-fit:cover; box-shadow:0 2px 10px rgba(0,0,0,.4); }}
-.brand-name {{ font-weight:800; font-size:1.18rem; color:{TEXT}; letter-spacing:-.02em; }}
+.login-head {{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:7px; margin:5vh 0 1.8rem; }}
+.login-logo {{ width:86px; height:86px; border-radius:24px; object-fit:cover; box-shadow:0 10px 30px rgba(47,227,155,.18); }}
+.login-title {{ font-weight:800; font-size:1.7rem; color:{TEXT}; letter-spacing:-.02em; }}
+.login-tag {{ color:{MUTED}; font-size:.95rem; }}
+.profile {{ display:flex; align-items:center; gap:11px; padding:12px 6px 8px; margin-top:18px; border-top:1px solid {BORDER}; }}
+.profile-av {{ width:38px; height:38px; border-radius:50%; background:{VERDE}; color:#05251a; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }}
+.profile-name {{ font-weight:700; color:{TEXT}; font-size:.92rem; line-height:1.15; }}
+.profile-role {{ color:{MUTED}; font-size:.75rem; overflow:hidden; text-overflow:ellipsis; max-width:150px; white-space:nowrap; }}
+.brand {{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:11px; padding:4px 4px 18px; }}
+.brand-logo {{ width:84px; height:84px; border-radius:22px; object-fit:cover; box-shadow:0 8px 22px rgba(0,0,0,.5); }}
+.brand-welcome {{ font-weight:700; font-size:1.05rem; color:{TEXT}; letter-spacing:-.01em; }}
 
 /* ---- Hero de patrimonio ---- */
 .hero {{
@@ -97,6 +105,18 @@ h1 {{ font-weight: 800; }}
 
 /* ---- Tarjetas / contenedores con borde ---- */
 [data-testid="stVerticalBlockBorderWrapper"] {{ border-radius:18px !important; border-color:{BORDER} !important; background:{CARD}; }}
+/* Botones dentro de una tarjeta: planos, sin doble borde. */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButton"] button {{
+    border:none !important; background:transparent !important; color:{TEXT} !important;
+    font-weight:650; border-radius:12px;
+}}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButton"] button:hover {{
+    background:{CARD_HI} !important; color:{VERDE} !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButton"] button p {{ font-size:1.02rem; font-weight:650; }}
+/* Chip de icono para las tarjetas plegables */
+.card-ic {{ width:40px; height:40px; border-radius:12px; background:{CARD_HI}; border:1px solid {BORDER};
+    display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; color:{VERDE}; }}
 
 /* ---- Pestañas ---- */
 button[data-baseweb="tab"] {{ font-weight:600; padding:.65rem .2rem; color:{MUTED}; }}
@@ -159,13 +179,37 @@ def inyectar() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
 
 
-def marca_sidebar(logo_path: str, titulo: str = "Mi Finanzas") -> str:
+def perfil_sidebar(nombre: str, email: str, es_admin: bool) -> str:
+    inicial = (nombre or email or "?").strip()[:1].upper()
+    rol = "Superadmin" if es_admin else email
+    return (
+        f'<div class="profile"><div class="profile-av">{inicial}</div>'
+        f'<div class="profile-info"><div class="profile-name">{nombre}</div>'
+        f'<div class="profile-role">{rol}</div></div></div>'
+    )
+
+
+def login_header(logo_path: str) -> str:
+    p = Path(logo_path)
+    img = ""
+    if p.exists():
+        datos = base64.b64encode(p.read_bytes()).decode()
+        img = f'<img src="data:image/webp;base64,{datos}" class="login-logo">'
+    return (
+        f'<div class="login-head">{img}'
+        f'<div class="login-title">Álvaro Finanzas</div>'
+        f'<div class="login-tag">Controla tu dinero, construye tu futuro.</div></div>'
+    )
+
+
+def marca_sidebar(logo_path: str, nombre: str = "") -> str:
     p = Path(logo_path)
     img = ""
     if p.exists():
         datos = base64.b64encode(p.read_bytes()).decode()
         img = f'<img src="data:image/webp;base64,{datos}" class="brand-logo">'
-    return f'<div class="brand">{img}<span class="brand-name">{titulo}</span></div>'
+    bienvenida = f'<div class="brand-welcome">Bienvenido, {nombre}</div>' if nombre else ""
+    return f'<div class="brand">{img}{bienvenida}</div>'
 
 
 def _sparkline(serie, color: str, idx: int = 0, w: int = 150, h: int = 36) -> str:

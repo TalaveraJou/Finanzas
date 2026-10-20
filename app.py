@@ -7,13 +7,15 @@ import streamlit as st
 from PIL import Image
 from streamlit_option_menu import option_menu
 
-from finanzas import db, estilo, proyeccion
+from finanzas import auth, db, estilo, proyeccion
 
 LOGOS_DIR = Path(__file__).resolve().parent / "data" / "logos"
 LOGO_SIZE = 64
 
 st.set_page_config(page_title="Finanzas", page_icon="💶", layout="wide")
 estilo.inyectar()
+
+usuario = auth.require_login()
 
 MESES_NOMBRE = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -33,11 +35,19 @@ MODO_LABELS = {
 }
 
 with st.sidebar:
-    st.markdown(estilo.marca_sidebar("assets/logo.webp"), unsafe_allow_html=True)
+    st.markdown(
+        estilo.marca_sidebar("assets/logo.webp", usuario.get("nombre") or usuario["email"]),
+        unsafe_allow_html=True,
+    )
+    opciones = ["Inicio", "Cuentas"]
+    iconos = ["speedometer2", "wallet2"]
+    if auth.es_superadmin():
+        opciones.append("Admin")
+        iconos.append("shield-lock")
     pagina = option_menu(
         menu_title=None,
-        options=["Inicio", "Cuentas"],
-        icons=["speedometer2", "wallet2"],
+        options=opciones,
+        icons=iconos,
         default_index=0,
         styles={
             "container": {"padding": "0", "background-color": estilo.BG},
@@ -49,6 +59,9 @@ with st.sidebar:
             "nav-link-selected": {"background-color": estilo.VERDE, "color": "#06240f"},
         },
     )
+    st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
+    if st.button("Cerrar sesión", use_container_width=True, key="logout_btn"):
+        auth.cerrar_sesion()
 
 
 def mapa_cuentas(cuentas: pd.DataFrame) -> dict[str, int]:
@@ -152,10 +165,14 @@ def tarjeta_desplegable(logo_path: str | None, titulo: str, key: str):
     contenedor = st.container(border=True)
     with contenedor:
         col_logo, col_boton = st.columns([1, 11], vertical_alignment="center")
-        if _logo_valido(logo_path):
-            col_logo.image(logo_path, width=36)
+        with col_logo:
+            if _logo_valido(logo_path):
+                st.image(logo_path, width=40)
+            else:
+                inicial = (titulo or "?").strip()[:1].upper()
+                st.markdown(f'<div class="card-ic">{inicial}</div>', unsafe_allow_html=True)
         flecha = "⌄" if abierto else "›"
-        if col_boton.button(f"{flecha}  {titulo}", key=f"toggle_{key}", use_container_width=True):
+        if col_boton.button(f"{titulo}   {flecha}", key=f"toggle_{key}", use_container_width=True):
             abierto = not abierto
             st.session_state[abierto_key] = abierto
             st.rerun()
@@ -1065,3 +1082,57 @@ elif pagina == "Cuentas":
             else:
                 pivot = proyeccion.tabla_proyeccion_pivot(detalle)
                 st.dataframe(proyeccion.estilo_proyeccion(pivot, detalle), width="stretch")
+
+
+# ===================================================================== Admin ====
+
+elif pagina == "Admin" and auth.es_superadmin():
+    st.title("Administración")
+    tab_users, tab_log = st.tabs(["Usuarios", "Accesos"])
+
+    with tab_users:
+        with st.form("nuevo_usuario", clear_on_submit=True):
+            st.markdown("**Crear usuario**")
+            c1, c2 = st.columns(2)
+            nuevo_email = c1.text_input("Email")
+            nuevo_nombre = c2.text_input("Nombre")
+            if st.form_submit_button("Crear usuario", type="primary"):
+                em = (nuevo_email or "").strip().lower()
+                if "@" not in em:
+                    st.error("Email no válido.")
+                elif db.obtener_usuario(em):
+                    st.warning("Ese usuario ya existe.")
+                else:
+                    db.crear_usuario(em, nuevo_nombre.strip(), "usuario")
+                    st.success(f"Usuario {em} creado. Creará su contraseña la primera vez que entre.")
+
+        st.markdown("**Usuarios**")
+        for u in db.cargar_usuarios().itertuples():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([4, 3, 2])
+                c1.markdown(f"**{u.nombre or '—'}**  \n{u.email}")
+                tiene_pw = isinstance(u.password_hash, str) and u.password_hash
+                c2.caption(
+                    f"Rol: {u.rol} · {'🟢 Activo' if u.activo else '🔴 Inactivo'}\n\n"
+                    f"{'🔑 Con contraseña' if tiene_pw else '⏳ Sin contraseña'}"
+                )
+                if u.rol != "superadmin":
+                    if c3.button("Desactivar" if u.activo else "Activar", key=f"tog_{u.email}", use_container_width=True):
+                        db.set_usuario_activo(u.email, not bool(u.activo))
+                        st.rerun()
+                    if c3.button("Eliminar", key=f"del_u_{u.email}", use_container_width=True):
+                        db.eliminar_usuario(u.email)
+                        st.rerun()
+
+    with tab_log:
+        st.markdown("**Registro de accesos**")
+        accesos = db.cargar_accesos(200)
+        if accesos.empty:
+            st.caption("Sin accesos registrados todavía.")
+        else:
+            st.dataframe(
+                accesos[["ts", "email", "evento", "detalle"]].rename(
+                    columns={"ts": "Fecha (UTC)", "email": "Email", "evento": "Evento", "detalle": "Detalle"}
+                ),
+                hide_index=True, width="stretch",
+            )

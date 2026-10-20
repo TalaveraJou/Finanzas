@@ -9,6 +9,8 @@ from sqlalchemy.engine import Engine, URL
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finanzas.db"
 
+SUPERADMIN_EMAIL = "alvarotalaverajou@icloud.com"
+
 
 # ---------------------------------------------------------------- Conexión ----
 # El almacenamiento es Postgres (Supabase) cuando hay credenciales en los
@@ -246,6 +248,41 @@ def init_db() -> None:
                     "Deporte", "Nómina", "Freelance", "Inversiones", "Otros",
                 )],
             )
+        conn.execute(text(
+            f"""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id {pk},
+                email TEXT NOT NULL UNIQUE,
+                nombre TEXT NOT NULL DEFAULT '',
+                password_hash TEXT,
+                rol TEXT NOT NULL DEFAULT 'usuario' CHECK (rol IN ('usuario', 'superadmin')),
+                activo INTEGER NOT NULL DEFAULT 1,
+                creado TEXT NOT NULL,
+                ultimo_acceso TEXT
+            )
+            """
+        ))
+        conn.execute(text(
+            f"""
+            CREATE TABLE IF NOT EXISTS accesos (
+                id {pk},
+                email TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                evento TEXT NOT NULL,
+                detalle TEXT
+            )
+            """
+        ))
+        # El superadmin existe desde el principio, sin contraseña: la crea él
+        # mismo la primera vez que entra.
+        conn.execute(
+            text(
+                "INSERT INTO usuarios (email, nombre, rol, activo, creado) "
+                "VALUES (:email, :nombre, 'superadmin', 1, :creado) "
+                "ON CONFLICT (email) DO NOTHING"
+            ),
+            {"email": SUPERADMIN_EMAIL, "nombre": "Álvaro", "creado": dt.datetime.utcnow().isoformat()},
+        )
     _inicializado = True
 
 
@@ -642,3 +679,69 @@ def actualizar_logo(tabla: str, id_: int, ruta: str | None) -> None:
     if tabla not in TABLAS_CON_LOGO:
         raise ValueError(f"Tabla sin columna logo: {tabla}")
     _ejecutar(f"UPDATE {tabla} SET logo = :ruta WHERE id = :id", {"ruta": ruta, "id": id_})
+
+
+# ---------------------------------------------------------- Usuarios / accesos ----
+
+def obtener_usuario(email: str) -> dict | None:
+    init_db()
+    df = _leer("SELECT * FROM usuarios WHERE email = :email", {"email": email.strip().lower()})
+    return df.iloc[0].to_dict() if not df.empty else None
+
+
+def crear_usuario(email: str, nombre: str, rol: str = "usuario") -> None:
+    init_db()
+    _ejecutar(
+        "INSERT INTO usuarios (email, nombre, rol, activo, creado) "
+        "VALUES (:email, :nombre, :rol, 1, :creado) ON CONFLICT (email) DO NOTHING",
+        {"email": email.strip().lower(), "nombre": nombre, "rol": rol,
+         "creado": dt.datetime.utcnow().isoformat()},
+    )
+
+
+def establecer_password(email: str, password_hash: str) -> None:
+    _ejecutar(
+        "UPDATE usuarios SET password_hash = :h WHERE email = :email",
+        {"h": password_hash, "email": email.strip().lower()},
+    )
+
+
+def actualizar_ultimo_acceso(email: str) -> None:
+    _ejecutar(
+        "UPDATE usuarios SET ultimo_acceso = :ts WHERE email = :email",
+        {"ts": dt.datetime.utcnow().isoformat(), "email": email.strip().lower()},
+    )
+
+
+def set_usuario_activo(email: str, activo: bool) -> None:
+    _ejecutar(
+        "UPDATE usuarios SET activo = :a WHERE email = :email",
+        {"a": int(activo), "email": email.strip().lower()},
+    )
+
+
+def eliminar_usuario(email: str) -> None:
+    _ejecutar("DELETE FROM usuarios WHERE email = :email AND rol <> 'superadmin'",
+              {"email": email.strip().lower()})
+
+
+def cargar_usuarios() -> pd.DataFrame:
+    init_db()
+    df = _leer("SELECT * FROM usuarios ORDER BY creado")
+    if not df.empty:
+        df["activo"] = df["activo"].astype(bool)
+    return df
+
+
+def registrar_acceso(email: str, evento: str, detalle: str = "") -> None:
+    init_db()
+    _ejecutar(
+        "INSERT INTO accesos (email, ts, evento, detalle) VALUES (:email, :ts, :evento, :detalle)",
+        {"email": email.strip().lower(), "ts": dt.datetime.utcnow().isoformat(),
+         "evento": evento, "detalle": detalle},
+    )
+
+
+def cargar_accesos(limite: int = 200) -> pd.DataFrame:
+    init_db()
+    return _leer("SELECT * FROM accesos ORDER BY ts DESC LIMIT :lim", {"lim": limite})
