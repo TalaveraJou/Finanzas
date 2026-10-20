@@ -171,23 +171,6 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
     .stat-value {{ font-size:1.25rem; }}
     .fin-sub {{ font-size:.72rem; }}
 }}
-
-
-/* ---- Login premium Álvaro Finanzas ---- */
-.login-head{{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;margin:4vh auto 2.2rem;padding:0 12px;max-width:540px}}
-.login-logo{{display:block;width:min(300px,68vw);height:auto;max-height:190px;object-fit:contain;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;margin:0 auto 4px}}
-.login-title{{font-weight:750;font-size:clamp(1.65rem,3vw,2rem);color:#eef1f5;letter-spacing:-.045em;line-height:1.15}}
-.login-tag{{color:#8a92a4;font-size:.94rem;margin-top:5px}}
-[data-testid="stAppViewContainer"] .block-container{{padding-top:1.4rem!important;max-width:1120px!important}}
-[data-testid="stAppViewContainer"] [data-testid="stForm"]{{max-width:460px;margin:0 auto;background:linear-gradient(145deg,rgba(25,30,39,.96),rgba(14,17,23,.98));border:1px solid #29313b;border-radius:22px;padding:1.5rem 1.45rem 1.35rem;box-shadow:0 22px 70px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.025)}}
-[data-testid="stAppViewContainer"] [data-testid="stForm"] label{{font-size:.88rem;font-weight:600;color:#dfe7ed}}
-[data-testid="stAppViewContainer"] [data-testid="stForm"] input{{min-height:49px!important;background:#0c1117!important;border:1px solid #27323c!important;border-radius:12px!important;color:#eef1f5!important}}
-[data-testid="stAppViewContainer"] [data-testid="stForm"] input:focus{{border-color:#2fe39b!important;box-shadow:0 0 0 3px rgba(47,227,155,.12)!important}}
-[data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button{{min-height:49px;background:linear-gradient(110deg,#65ffc5,#2fe39b 70%,#14c98a)!important;color:#05251a!important;font-weight:750!important;border:0!important;border-radius:12px!important;transition:transform .15s ease,filter .15s ease}}
-[data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button:hover{{filter:brightness(1.06);transform:translateY(-1px)}}
-[data-testid="stAppViewContainer"] [data-testid="stForm"] + div{{max-width:460px;margin:0 auto}}
-@media(max-width:700px){{.login-head{{margin:2vh auto 1.7rem}}.login-logo{{width:min(250px,72vw);max-height:155px}}[data-testid="stAppViewContainer"] [data-testid="stForm"]{{padding:1.15rem 1rem;border-radius:18px}}}}
-
 </style>
 """
 
@@ -203,6 +186,92 @@ def perfil_sidebar(nombre: str, email: str, es_admin: bool) -> str:
         f'<div class="profile"><div class="profile-av">{inicial}</div>'
         f'<div class="profile-info"><div class="profile-name">{nombre}</div>'
         f'<div class="profile-role">{rol}</div></div></div>'
+    )
+
+
+# CSS del login en crudo (NO es f-string): aquí se puede escribir CSS normal con
+# llaves simples sin romper nada. Solo se inyecta en la pantalla de login, así
+# que estos estilos no afectan a formularios de otras páginas.
+CSS_LOGIN = """
+<style>
+[data-testid="stAppViewContainer"] .block-container { max-width: 1040px !important; padding-top: 4vh !important; }
+.login-panel {
+    position: relative; overflow: hidden; height: 100%;
+    border: 1px solid #222a33; border-radius: 24px; padding: 40px 34px;
+    background:
+        radial-gradient(120% 90% at 20% 0%, rgba(47,227,155,.18), transparent 55%),
+        linear-gradient(160deg, #0f1620 0%, #0a0d13 70%);
+    display: flex; flex-direction: column; justify-content: center; min-height: 460px;
+}
+.login-panel .lp-logo svg { width: 240px; max-width: 70%; height: auto; display: block; margin-bottom: 12px; }
+.login-panel .lp-tag { color: #9aa3b2; font-size: 1rem; margin-top: 2px; line-height: 1.45; }
+.login-phone {
+    margin-top: 30px; align-self: flex-start; transform: rotate(-4deg);
+    background: linear-gradient(150deg, #181d26, #10141b); border: 1px solid #262e39;
+    border-radius: 18px; padding: 16px 18px; width: 210px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+}
+.login-phone .lp-lbl { color: #9aa3b2; font-size: .78rem; }
+.login-phone .lp-val { color: #fff; font-size: 1.5rem; font-weight: 800; letter-spacing: -.03em; margin: 2px 0 8px; }
+.login-phone .lp-chip { display: inline-block; color: #2fe39b; background: rgba(47,227,155,.14); font-size: .72rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+.login-phone svg { display: block; margin-top: 10px; width: 100%; height: 40px; }
+
+.lg-head h2 { font-weight: 800; font-size: 1.9rem; color: #eef1f5; letter-spacing: -.02em; margin: 0 0 4px; }
+.lg-head p { color: #8a92a4; margin: 0 0 14px; }
+
+/* Formulario = tarjeta derecha */
+[data-testid="stForm"] {
+    border: 1px solid #222a33 !important; border-radius: 22px !important;
+    background: linear-gradient(150deg, #141922, #0e121a) !important; padding: 1.4rem 1.4rem 1.2rem !important;
+}
+[data-testid="stForm"] label { font-size: .86rem !important; font-weight: 600 !important; color: #cbd3de !important; }
+[data-testid="stForm"] input {
+    min-height: 50px !important; border: 1px solid #262f3a !important;
+    border-radius: 13px !important; color: #eef1f5 !important; padding-left: 42px !important;
+    background-color: #0b0f15 !important; background-repeat: no-repeat !important; background-position: 13px center !important;
+    background-size: 18px 18px !important;
+}
+[data-testid="stForm"] input:focus { border-color: #2fe39b !important; box-shadow: 0 0 0 3px rgba(47,227,155,.12) !important; }
+[data-testid="stForm"] input[type="text"] {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%238a92a4' stroke-width='1.7'%3E%3Crect x='2.5' y='4' width='13' height='10' rx='2'/%3E%3Cpath d='m3 5 6 5 6-5'/%3E%3C/svg%3E") !important;
+}
+[data-testid="stForm"] input[type="password"] {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%238a92a4' stroke-width='1.7'%3E%3Crect x='3.5' y='8' width='11' height='7' rx='2'/%3E%3Cpath d='M6 8V6a3 3 0 0 1 6 0v2'/%3E%3C/svg%3E") !important;
+}
+[data-testid="stFormSubmitButton"] button {
+    min-height: 52px; background: linear-gradient(110deg,#5bf0bd,#2fe39b 65%,#19cc8d) !important;
+    color: #05251a !important; font-weight: 800 !important; border: 0 !important; border-radius: 13px !important;
+    font-size: 1rem !important; transition: transform .15s ease, filter .15s ease;
+}
+[data-testid="stFormSubmitButton"] button:hover { filter: brightness(1.05); transform: translateY(-1px); }
+[data-testid="stFormSubmitButton"] button p::after { content: "  →"; font-weight: 700; }
+
+.lg-forgot { text-align: right; color: #2fe39b; font-size: .86rem; font-weight: 600; padding-top: 6px; cursor: pointer; }
+.lg-divider { display: flex; align-items: center; gap: 12px; color: #6b7382; margin: 14px 2px; }
+.lg-divider::before, .lg-divider::after { content: ""; flex: 1; height: 1px; background: #242b35; }
+
+@media (max-width: 760px) {
+    .login-panel { min-height: auto; padding: 26px 22px; }
+    .login-phone { display: none; }
+}
+</style>
+"""
+
+
+def login_panel_izq(logo_svg: str = "assets/logo-login.svg") -> str:
+    p = Path(logo_svg)
+    svg = p.read_text(encoding="utf-8") if p.exists() else ""
+    img = f'<div class="lp-logo">{svg}</div>'
+    onda = (
+        '<svg viewBox="0 0 200 40" preserveAspectRatio="none">'
+        '<polyline points="0,32 20,28 40,30 60,20 80,24 100,14 120,18 140,10 160,14 180,6 200,9" '
+        'fill="none" stroke="#2fe39b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    )
+    return (
+        f'<div class="login-panel">{img}'
+        f'<div class="lp-tag">Controla tu dinero,<br>construye tu futuro.</div>'
+        f'<div class="login-phone"><div class="lp-lbl">Patrimonio neto</div>'
+        f'<div class="lp-val">12.840 €</div><span class="lp-chip">↗ +2,4%</span>{onda}</div></div>'
     )
 
 

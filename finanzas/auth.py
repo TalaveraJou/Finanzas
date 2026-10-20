@@ -86,31 +86,47 @@ def _guardar_password(email: str, p1: str, p2: str) -> None:
 
 
 def _pantalla_login() -> None:
-    st.markdown(estilo.login_header("assets/logo.webp"), unsafe_allow_html=True)
-    _, centro, _ = st.columns([1, 1.25, 1])
-    with centro:
+    st.markdown(estilo.CSS_LOGIN, unsafe_allow_html=True)
+    col_izq, col_der = st.columns([1, 1.08], gap="medium")
+    with col_izq:
+        st.markdown(estilo.login_panel_izq(), unsafe_allow_html=True)
+    with col_der:
         email_pendiente = st.session_state.get("set_pw_email")
         if email_pendiente:
-            st.markdown("#### Crea tu contraseña")
-            st.caption(f"Primer acceso de **{email_pendiente}**")
+            st.markdown(
+                f'<div class="lg-head"><h2>Crea tu contraseña</h2>'
+                f'<p>Primer acceso de {email_pendiente}</p></div>',
+                unsafe_allow_html=True,
+            )
             # Dentro de un form los valores se envían juntos al pulsar el botón,
             # así no se pierde la contraseña por latencia (campo suelto + clic).
             with st.form("crear_password", clear_on_submit=False):
-                p1 = st.text_input("Contraseña", type="password")
-                p2 = st.text_input("Repite la contraseña", type="password")
+                p1 = st.text_input("Contraseña", type="password", placeholder="Mínimo 8 caracteres")
+                p2 = st.text_input("Repite la contraseña", type="password", placeholder="Repite la contraseña")
                 if st.form_submit_button("Guardar y entrar", use_container_width=True, type="primary"):
                     _guardar_password(email_pendiente, p1, p2)
             if st.button("← Volver", use_container_width=True):
                 st.session_state.pop("set_pw_email", None)
                 st.rerun()
         else:
-            st.markdown("#### Bienvenido de nuevo")
-            st.caption("Inicia sesión en Álvaro Finanzas")
+            st.markdown(
+                '<div class="lg-head"><h2>Bienvenido de nuevo</h2>'
+                '<p>Inicia sesión en Álvaro Finanzas</p></div>',
+                unsafe_allow_html=True,
+            )
             with st.form("login", clear_on_submit=False):
                 email = st.text_input("Email", placeholder="tu@email.com")
                 password = st.text_input("Contraseña", type="password", placeholder="Tu contraseña")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.checkbox("Recordarme", value=True)
+                with c2:
+                    st.markdown('<div class="lg-forgot">¿Has olvidado tu contraseña?</div>', unsafe_allow_html=True)
                 if st.form_submit_button("Iniciar sesión", use_container_width=True, type="primary"):
                     _procesar_login(email, password)
+            st.markdown('<div class="lg-divider"><span>o</span></div>', unsafe_allow_html=True)
+            if st.button("🔑  Acceder con clave de acceso", use_container_width=True, key="passkey_btn"):
+                st.info("La clave de acceso (passkey) aún no está disponible. Entra con tu email y contraseña.")
 
 
 def require_login() -> dict:
