@@ -231,13 +231,18 @@ div[data-testid="stButton"] button > div {{ justify-content:flex-start !importan
     .stat-value {{ font-size:1.25rem; }}
     .fin-sub {{ font-size:.72rem; }}
 }}
+</style>
+"""
 
-/* ====================================================================
-   Caparazón de app nativa: cabecera fija + barra de pestañas inferior
-   fija, sin barra lateral, sin scroll lateral, con zonas seguras de
-   iPhone (notch / home indicator). Toda la app usa este caparazón; en
-   pantallas anchas queda centrada como una "ficha" con ancho de móvil.
-   ==================================================================== */
+# ============================================================================
+# Caparazón de app nativa (solo móvil): cabecera fija + barra de pestañas
+# inferior fija, sin barra lateral, sin scroll lateral, con zonas seguras de
+# iPhone (notch / home indicator). Se inyecta SOLO cuando se detecta un
+# user-agent móvil (ver app.py); en escritorio la app sigue usando la barra
+# lateral de siempre con este bloque sin aplicar.
+# ============================================================================
+CSS_MOBIL = f"""
+<style>
 :root {{ --app-max-width: 480px; --header-h: 64px; --nav-h: 64px; }}
 
 html, body {{ overflow-x: hidden !important; background: {BG}; overscroll-behavior-y: none; }}
@@ -265,12 +270,14 @@ input, textarea, select {{ font-size: 16px !important; }}
     box-shadow: 0 1px 8px rgba(11,28,48,.04);
     padding: calc(env(safe-area-inset-top) + 10px) 16px 10px !important;
 }}
-.st-key-app_header [data-testid="stHorizontalBlock"] {{ align-items: center; }}
+.st-key-app_header [data-testid="stHorizontalBlock"] {{ align-items: center; flex-wrap: nowrap; }}
+.st-key-app_header [data-testid="column"]:last-child {{ display: flex; justify-content: flex-end; }}
 .st-key-app_header [data-testid="stButton"] button {{
     background: {CARD_HI}; border: 1px solid {BORDER}; border-radius: 999px;
-    width: 40px; height: 40px; padding: 0; font-size: 15px; color: {MUTED}; min-height: 40px;
+    width: 40px; height: 40px; padding: 0; min-height: 40px; min-width: 40px;
+    display: inline-flex; align-items: center; justify-content: center; color: {MUTED};
 }}
-.app-header-brand {{ display:flex; align-items:center; gap:10px; }}
+.app-header-brand {{ display:flex; align-items:center; gap:10px; min-width:0; }}
 .app-header-logo {{ width:36px; height:36px; border-radius:8px; object-fit:cover; flex-shrink:0; }}
 .app-header-text {{ min-width:0; }}
 .app-header-title {{ font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:1.02rem; letter-spacing:-.01em; color:{TEXT}; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
@@ -297,8 +304,10 @@ input, textarea, select {{ font-size: 16px !important; }}
 """
 
 
-def inyectar() -> None:
+def inyectar(movil: bool = False) -> None:
     st.markdown(CSS, unsafe_allow_html=True)
+    if movil:
+        st.markdown(CSS_MOBIL, unsafe_allow_html=True)
 
 
 def perfil_sidebar(nombre: str, email: str, es_admin: bool) -> str:

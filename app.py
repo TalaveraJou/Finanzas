@@ -13,8 +13,14 @@ from streamlit_option_menu import option_menu
 from finanzas import auth, db, estilo, proyeccion
 LOGO_SIZE = 64
 
-st.set_page_config(page_title="Finanzas", page_icon="💶", layout="wide", initial_sidebar_state="collapsed")
-estilo.inyectar()
+_UA = (st.context.headers.get("User-Agent") or "") if hasattr(st, "context") else ""
+ES_MOVIL = any(m in _UA for m in ("Mobi", "iPhone", "Android"))
+
+st.set_page_config(
+    page_title="Finanzas", page_icon="💶", layout="wide",
+    initial_sidebar_state="collapsed" if ES_MOVIL else "expanded",
+)
+estilo.inyectar(movil=ES_MOVIL)
 
 usuario = auth.require_login()
 
@@ -35,62 +41,100 @@ MODO_LABELS = {
     "remanente": "Lo que sobre (ingresos − gastos − deudas − ahorro)",
 }
 
-with st.container(key="app_header"):
-    c_logo, c_logout = st.columns([5, 1])
-    with c_logo:
+if ES_MOVIL:
+    # --------------------------------------------- Caparazón móvil nativo ----
+    with st.container(key="app_header"):
+        c_logo, c_logout = st.columns([5, 1])
+        with c_logo:
+            st.markdown(
+                estilo.cabecera_app("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
+                unsafe_allow_html=True,
+            )
+        with c_logout:
+            if st.button("", key="logout_btn_header", icon=":material/logout:", help="Cerrar sesión"):
+                auth.cerrar_sesion()
+
+    opciones = ["Inicio", "Flujo de Caja", "Inversiones", "Más"]
+    iconos = ["speedometer2", "arrow-left-right", "graph-up-arrow", "three-dots"]
+
+    MAS_OPCIONES = {"Metas": "Objetivos y Metas", "Ahorro": "Ahorros e Inversiones", "Cuentas": "Cuentas"}
+    if auth.es_superadmin():
+        MAS_OPCIONES["Admin"] = "Admin"
+
+    with st.container(key="bottom_nav"):
+        seleccion_nav = option_menu(
+            menu_title=None,
+            options=opciones,
+            icons=iconos,
+            default_index=0,
+            orientation="horizontal",
+            styles={
+                "container": {
+                    "padding": "4px 0", "background-color": "transparent", "box-shadow": "none",
+                    "display": "flex", "flex-wrap": "nowrap", "justify-content": "space-around",
+                    "width": "100%",
+                },
+                "icon": {"font-size": "20px", "margin-bottom": "2px"},
+                "nav-link": {
+                    "display": "flex", "flex-direction": "column", "align-items": "center",
+                    "justify-content": "center", "gap": "1px", "font-size": "10.5px", "font-weight": "600",
+                    "padding": "6px 4px 4px", "margin": "0", "border-radius": "12px", "flex": "1 1 0",
+                    "min-width": "0", "max-width": "none",
+                    "color": estilo.MUTED, "white-space": "nowrap", "overflow": "hidden",
+                    "text-overflow": "ellipsis",
+                },
+                "nav-link-selected": {"background-color": "transparent", "color": estilo.ACCENT},
+            },
+        )
+
+    if seleccion_nav == "Más":
+        st.session_state.setdefault("mas_sel", "Metas")
+        with st.container(key="mas_subnav"):
+            elegido = st.segmented_control(
+                "Más", list(MAS_OPCIONES.keys()), default=st.session_state["mas_sel"],
+                label_visibility="collapsed", key="mas_segmented",
+            )
+        if elegido:
+            st.session_state["mas_sel"] = elegido
+        pagina = MAS_OPCIONES[st.session_state["mas_sel"]]
+    else:
+        pagina = seleccion_nav
+else:
+    # ------------------------------------------- Barra lateral de escritorio ----
+    with st.sidebar:
         st.markdown(
-            estilo.cabecera_app("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
+            estilo.marca_sidebar("assets/logo-login.svg", usuario.get("nombre") or usuario["email"]),
             unsafe_allow_html=True,
         )
-    with c_logout:
-        if st.button("⎋", key="logout_btn_header", help="Cerrar sesión"):
-            auth.cerrar_sesion()
-
-opciones = ["Inicio", "Flujo de Caja", "Inversiones", "Más"]
-iconos = ["speedometer2", "arrow-left-right", "graph-up-arrow", "three-dots"]
-
-MAS_OPCIONES = {"Metas": "Objetivos y Metas", "Ahorro": "Ahorros e Inversiones", "Cuentas": "Cuentas"}
-if auth.es_superadmin():
-    MAS_OPCIONES["Admin"] = "Admin"
-
-with st.container(key="bottom_nav"):
-    seleccion_nav = option_menu(
-        menu_title=None,
-        options=opciones,
-        icons=iconos,
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {
-                "padding": "4px 0", "background-color": "transparent", "box-shadow": "none",
-                "display": "flex", "flex-wrap": "nowrap", "justify-content": "space-around",
-                "width": "100%",
+        opciones = [
+            "Inicio", "Flujo de Caja", "Inversiones", "Objetivos y Metas",
+            "Ahorros e Inversiones", "Cuentas",
+        ]
+        iconos = [
+            "speedometer2", "arrow-left-right", "graph-up-arrow", "flag",
+            "piggy-bank", "wallet2",
+        ]
+        if auth.es_superadmin():
+            opciones.append("Admin")
+            iconos.append("shield-lock")
+        pagina = option_menu(
+            menu_title=None,
+            options=opciones,
+            icons=iconos,
+            default_index=0,
+            styles={
+                "container": {"padding": "0", "background-color": estilo.BG_SOFT},
+                "icon": {"color": estilo.ACCENT, "font-size": "16px"},
+                "nav-link": {
+                    "font-size": "15px", "text-align": "left", "margin": "2px",
+                    "border-radius": "8px", "color": estilo.TEXT, "white-space": "nowrap",
+                },
+                "nav-link-selected": {"background-color": estilo.ACCENT, "color": "#ffffff"},
             },
-            "icon": {"font-size": "20px", "margin-bottom": "2px"},
-            "nav-link": {
-                "display": "flex", "flex-direction": "column", "align-items": "center",
-                "justify-content": "center", "gap": "1px", "font-size": "10.5px", "font-weight": "600",
-                "padding": "6px 4px 4px", "margin": "0", "border-radius": "12px", "flex": "1 1 0",
-                "min-width": "0", "max-width": "none",
-                "color": estilo.MUTED, "white-space": "nowrap", "overflow": "hidden",
-                "text-overflow": "ellipsis",
-            },
-            "nav-link-selected": {"background-color": "transparent", "color": estilo.ACCENT},
-        },
-    )
-
-if seleccion_nav == "Más":
-    st.session_state.setdefault("mas_sel", "Metas")
-    with st.container(key="mas_subnav"):
-        elegido = st.segmented_control(
-            "Más", list(MAS_OPCIONES.keys()), default=st.session_state["mas_sel"],
-            label_visibility="collapsed", key="mas_segmented",
         )
-    if elegido:
-        st.session_state["mas_sel"] = elegido
-    pagina = MAS_OPCIONES[st.session_state["mas_sel"]]
-else:
-    pagina = seleccion_nav
+        st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
+        if st.button("Cerrar sesión", use_container_width=True, key="logout_btn"):
+            auth.cerrar_sesion()
 
 
 def mapa_cuentas(cuentas: pd.DataFrame) -> dict[str, int]:
