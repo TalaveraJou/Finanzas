@@ -327,16 +327,15 @@ CSS_LOGIN = """
 <style>
 [data-testid="stAppViewContainer"] .block-container { max-width: 1120px !important; padding-top: 4vh !important; }
 
-/* ---- Fondo con formas geométricas en gris (en vez de blanco liso) ---- */
+/* ---- Fondo liso con estelas verdes suaves (en vez de blanco liso) ---- */
 [data-testid="stAppViewContainer"] {
-    background-color: #eef1f6;
+    background-color: #eef2f3;
     background-image:
-        radial-gradient(circle at 12% 18%, rgba(100,116,139,.14) 0%, transparent 42%),
-        radial-gradient(circle at 88% 15%, rgba(100,116,139,.10) 0%, transparent 46%),
-        radial-gradient(circle at 80% 85%, rgba(100,116,139,.12) 0%, transparent 48%),
-        linear-gradient(rgba(100,116,139,.07) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,116,139,.07) 1px, transparent 1px);
-    background-size: auto, auto, auto, 34px 34px, 34px 34px;
+        linear-gradient(118deg, transparent 0%, transparent 34%, rgba(16,185,129,.16) 46%, transparent 60%, transparent 100%),
+        linear-gradient(118deg, transparent 0%, transparent 58%, rgba(16,185,129,.09) 68%, transparent 80%, transparent 100%),
+        radial-gradient(ellipse 60% 45% at 88% 8%, rgba(16,185,129,.12) 0%, transparent 65%),
+        radial-gradient(ellipse 55% 45% at 4% 96%, rgba(37,99,235,.08) 0%, transparent 65%);
+    background-attachment: fixed;
 }
 
 /* ---- Logo + nombre de la app sobre el formulario de acceso ---- */
@@ -350,10 +349,6 @@ CSS_LOGIN = """
     position: relative; overflow: hidden; height: 100%;
     border: 1px solid #1e293b; border-radius: 16px; padding: 40px 36px;
     background-color: #0b1220;
-    background-image:
-        linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
-    background-size: 28px 28px;
     display: flex; flex-direction: column; justify-content: center; gap: 22px; min-height: 620px;
 }
 .lp-brand { display: flex; align-items: center; gap: 12px; }
@@ -508,6 +503,16 @@ def login_panel_izq(logo_svg: str = "assets/logo-login.svg") -> str:
     """
 
 
+def _mime_imagen(p: Path) -> str:
+    """MIME real según la extensión del archivo, para no etiquetar mal un
+    data URI (p. ej. bytes de PNG servidos como si fueran WebP, que el
+    navegador entonces no consigue decodificar y no muestra nada)."""
+    return {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }.get(p.suffix.lower(), "image/png")
+
+
 def login_marca_derecha(logo_path: str = "assets/logo-login.svg") -> str:
     """Logo + nombre de la app sobre el formulario de acceso, para que se
     identifique la marca aunque no se vea (o no se haya hecho scroll hasta)
@@ -519,7 +524,7 @@ def login_marca_derecha(logo_path: str = "assets/logo-login.svg") -> str:
             img = f'<div class="lg-brand-logo-svg">{p.read_text(encoding="utf-8")}</div>'
         else:
             datos = base64.b64encode(p.read_bytes()).decode()
-            img = f'<img src="data:image/webp;base64,{datos}">'
+            img = f'<img src="data:{_mime_imagen(p)};base64,{datos}">'
     return (
         f'<div class="lg-brand-mini">{img}<div>'
         f'<div class="lg-brand-mini-text">Álvaro Finanzas</div>'
@@ -571,7 +576,7 @@ def marca_sidebar(logo_path: str = "assets/logo-login.svg", nombre: str = "") ->
             img = f'<div class="brand-logo-svg">{p.read_text(encoding="utf-8")}</div>'
         else:
             datos = base64.b64encode(p.read_bytes()).decode()
-            img = f'<img src="data:image/webp;base64,{datos}" class="brand-logo">'
+            img = f'<img src="data:{_mime_imagen(p)};base64,{datos}" class="brand-logo">'
     bienvenida = f'<div class="brand-welcome">Bienvenido, {nombre}</div>' if nombre else ""
     return f'<div class="brand">{img}{bienvenida}</div>'
 
