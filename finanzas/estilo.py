@@ -374,7 +374,9 @@ CSS_LOGIN = """
     width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; margin-top: 1px;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
     display: flex; align-items: center; justify-content: center; font-size: 15px;
+    color: #a7f3d0;
 }
+.lp-feature-ic svg { width: 18px; height: 18px; }
 .lp-feature-title { color: #e2e8f0; font-weight: 700; font-size: .9rem; margin-bottom: 2px; }
 .lp-feature-desc { color: #64748b; font-size: .8rem; line-height: 1.45; }
 .lp-status {
