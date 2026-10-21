@@ -327,6 +327,24 @@ CSS_LOGIN = """
 <style>
 [data-testid="stAppViewContainer"] .block-container { max-width: 1120px !important; padding-top: 4vh !important; }
 
+/* ---- Fondo con formas geométricas en gris (en vez de blanco liso) ---- */
+[data-testid="stAppViewContainer"] {
+    background-color: #eef1f6;
+    background-image:
+        radial-gradient(circle at 12% 18%, rgba(100,116,139,.14) 0%, transparent 42%),
+        radial-gradient(circle at 88% 15%, rgba(100,116,139,.10) 0%, transparent 46%),
+        radial-gradient(circle at 80% 85%, rgba(100,116,139,.12) 0%, transparent 48%),
+        linear-gradient(rgba(100,116,139,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(100,116,139,.07) 1px, transparent 1px);
+    background-size: auto, auto, auto, 34px 34px, 34px 34px;
+}
+
+/* ---- Logo + nombre de la app sobre el formulario de acceso ---- */
+.lg-brand-mini { display: flex; align-items: center; gap: 11px; margin-bottom: 18px; }
+.lg-brand-mini img, .lg-brand-mini .lg-brand-logo-svg svg { width: 42px; height: 42px; display: block; border-radius: 10px; }
+.lg-brand-mini-text { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 1.15rem; color: #0f172a; letter-spacing: -.01em; line-height: 1.2; }
+.lg-brand-mini-sub { color: #64748b; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+
 /* ---- Panel izquierdo: institucional, oscuro, con rejilla ---- */
 .login-panel {
     position: relative; overflow: hidden; height: 100%;
@@ -488,6 +506,26 @@ def login_panel_izq(logo_svg: str = "assets/logo-login.svg") -> str:
         </div>
     </div>
     """
+
+
+def login_marca_derecha(logo_path: str = "assets/logo-login.svg") -> str:
+    """Logo + nombre de la app sobre el formulario de acceso, para que se
+    identifique la marca aunque no se vea (o no se haya hecho scroll hasta)
+    el panel institucional izquierdo."""
+    p = Path(logo_path)
+    img = ""
+    if p.exists():
+        if p.suffix == ".svg":
+            img = f'<div class="lg-brand-logo-svg">{p.read_text(encoding="utf-8")}</div>'
+        else:
+            datos = base64.b64encode(p.read_bytes()).decode()
+            img = f'<img src="data:image/webp;base64,{datos}">'
+    return (
+        f'<div class="lg-brand-mini">{img}<div>'
+        f'<div class="lg-brand-mini-text">Álvaro Finanzas</div>'
+        f'<div class="lg-brand-mini-sub">Gestión patrimonial</div>'
+        f'</div></div>'
+    )
 
 
 def login_cabecera_derecha() -> str:

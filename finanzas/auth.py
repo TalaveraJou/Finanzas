@@ -92,6 +92,7 @@ def _pantalla_login() -> None:
         st.markdown(estilo.login_panel_izq(), unsafe_allow_html=True)
     with col_der:
         email_pendiente = st.session_state.get("set_pw_email")
+        st.markdown(estilo.login_marca_derecha(), unsafe_allow_html=True)
         if email_pendiente:
             st.markdown(
                 f'<div class="lg-head"><h2>Crea tu contraseña</h2>'
