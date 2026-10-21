@@ -1,6 +1,7 @@
 import math
 
 import pandas as pd
+import streamlit as st
 
 COLOR_TIPO = {
     "ingreso": "#1e8e3e",
@@ -121,6 +122,7 @@ def info_deuda(row, valores: pd.DataFrame, hoy: pd.Timestamp | None = None) -> d
     }
 
 
+@st.cache_data(show_spinner=False)
 def detalle_mensual(
     conceptos: pd.DataFrame, deudas: pd.DataFrame, ahorros: pd.DataFrame,
     movimientos: pd.DataFrame, valores: pd.DataFrame, periodos: list[pd.Period],
